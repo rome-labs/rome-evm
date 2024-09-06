@@ -26,21 +26,21 @@ jobs:
       - name: Check Docker Compose version
         run: docker-compose --version
 
-      - name: 'Checkout rome-sdk repository'
-        uses: actions/checkout@master
-        with:
-          repository: rome-labs/rome-sdk
-          path: rome-sdk
-          ref: ${{env.ROME_SDK_REF_NAME}}
-          token: ${{ secrets.GIT_ROLLUP_TOKEN }}
+      # - name: 'Checkout rome-sdk repository'
+      #   uses: actions/checkout@master
+      #   with:
+      #     repository: rome-labs/rome-sdk
+      #     path: rome-sdk
+      #     ref: ${{env.ROME_SDK_REF_NAME}}
+      #     token: ${{ secrets.GIT_ROLLUP_TOKEN }}
 
-      - name: 'Checkout tests repository'
-        uses: actions/checkout@master
-        with:
-          repository: rome-labs/tests
-          path: tests
-          ref: ${{env.TESTS_REF_NAME}}
-          token: ${{ secrets.GIT_ROLLUP_TOKEN }}
+      # - name: 'Checkout tests repository'
+      #   uses: actions/checkout@master
+      #   with:
+      #     repository: rome-labs/tests
+      #     path: tests
+      #     ref: ${{env.TESTS_REF_NAME}}
+      #     token: ${{ secrets.GIT_ROLLUP_TOKEN }}
 
       - name: 'Checkout rome-evm repository'
         uses: actions/checkout@v4
