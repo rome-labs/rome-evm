@@ -1,0 +1,33 @@
+[package]
+name = "rome-evm"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["custom-heap"]
+custom-heap = []
+no-entrypoint = []
+
+[dependencies]
+evm = { workspace = true }
+solana-program = { workspace = true }
+rlp = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
+borsh = { workspace = true }
+borsh-derive = { workspace = true }
+ripemd = { workspace = true }
+
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+solana-client = "1.17.28"
+bincode = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))', 'cfg(feature, values("no-entrypoint"))'] }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]

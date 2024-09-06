@@ -1,0 +1,25 @@
+[workspace]
+
+members = [
+    "emulator",
+    "program",
+    "initializer"
+]
+exclude = [
+    "evm"
+]
+resolver = "2"
+
+[workspace.dependencies]
+thiserror = "1.0.58"
+solana-client = "1.18.17"
+solana-sdk = "1.18.17"
+solana-program = "1.18.17"
+hex = "0.4.3"
+rlp = { version = "0.5.2", features = ["derive"] }
+bincode = "1.3.1"
+ripemd = "0.1"
+borsh = "0.9.3"
+borsh-derive = "0.9.3"
+
+evm = {git = "https://github.com/rome-protocol/evm.git", tag = "v0.18.0" }

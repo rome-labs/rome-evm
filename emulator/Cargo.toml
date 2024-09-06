@@ -1,0 +1,20 @@
+[package]
+name = "emulator"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rome-evm = {path = "../program", features = ["no-entrypoint"]}
+solana-program = { workspace = true }
+solana-client = { workspace = true }
+solana-sdk = { workspace = true }
+bincode = { workspace = true }
+hex = { workspace = true }
+borsh = { workspace = true }
+borsh-derive = { workspace = true }
+
+[lib]
+name = "emulator"
+path = "src/lib.rs"
