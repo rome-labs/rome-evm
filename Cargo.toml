@@ -22,4 +22,4 @@ ripemd = "0.1"
 borsh = "0.9.3"
 borsh-derive = "0.9.3"
 
-evm = {git = "https://github.com/rome-protocol/evm.git", tag = "v0.18.0" }
+evm = {git = "https://github.com/rome-labs/evm.git", tag = "v0.18.0" }
