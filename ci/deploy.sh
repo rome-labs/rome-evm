@@ -27,7 +27,7 @@ echo "Deploying Rome-EVM to ${PROGRAM_ADDRESS} with upgrade authority ${CONTRACT
 sleep 2
 
 if ! /usr/bin/solana program deploy \
-  --program-id "${ROME_EVM_KEYPAIR}" /opt/rome-evm-private/target/deploy/rome_evm.so \
+  --program-id "${ROME_EVM_KEYPAIR}" /opt/rome-evm/target/deploy/rome_evm.so \
   --upgrade-authority "${CONTRACT_OWNER_KEYPAIR}" \
   --fee-payer "${CONTRACT_OWNER_KEYPAIR}"; then
     echo "Failed to deploy Rome-EVM"
