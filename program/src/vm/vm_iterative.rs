@@ -183,6 +183,7 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
                 } else {
                     self.context.deserialize_vm(self)?;
                     self.handler.commit()?;
+                    self.log_gas_transfer();
                     self.log_exit_reason()?;
                     NextIteration(Box::new(Unlock))
                 }

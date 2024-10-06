@@ -1,10 +1,6 @@
 use {
-    crate::{
-        api::{do_tx_holder_iterative, do_tx_iterative},
-        context::gas_recipient,
-        state::State,
-        Instruction,
-    },
+    super::iterative_lock::iterative_lock,
+    crate::state::State,
     rome_evm::{
         context::{
             account_lock::AccountLock,
@@ -12,71 +8,41 @@ use {
                 bind_tx_to_holder_impl, deserialize_vm_impl, is_tx_binded_to_holder_impl,
                 restore_iteration_impl, save_iteration_impl, serialize_vm_impl,
             },
-            tx_from_holder, Context,
+            Context,
         },
         error::Result,
         state::{origin::Origin, Allocate},
-        tx::tx::Tx,
+        tx::{legacy::Legacy, tx::Tx},
         vm::{vm_iterative::MachineIterative, Vm},
         Iterations, H160, H256,
     },
-    solana_program::{account_info::IntoAccountInfo, keccak, msg},
+    solana_program::account_info::IntoAccountInfo,
 };
 
-pub struct ContextIterative<'a, 'b> {
+pub struct ContextEstimateGas<'a, 'b> {
+    pub legacy: Legacy,
     pub state: &'b State<'a>,
     pub holder: u64,
-    pub data: &'a [u8],
-    pub instr: Instruction,
     pub tx_hash: H256,
 }
-
-impl<'a, 'b> ContextIterative<'a, 'b> {
-    pub fn new(state: &'b State<'a>, data: &'a [u8], instr: Instruction) -> Result<Self> {
-        let (holder, hash) = match instr {
-            Instruction::DoTxIterative => {
-                let (holder, tx) = do_tx_iterative::args(data)?;
-                let hash = keccak::hash(tx);
-
-                (holder, H256::from(hash.to_bytes()))
-            }
-            Instruction::DoTxHolderIterative => {
-                let (holder, hash) = do_tx_holder_iterative::args(data)?;
-                (holder, hash)
-            }
-            _ => unreachable!(),
-        };
-
-        // allocation affects the vm behaviour.
-        // it is important to allocate state_holder before the starting the vm
-        let state_holder = state.info_state_holder(holder, true)?;
-        msg!("state_holder data length: {}", state_holder.1.data.len());
+impl<'a, 'b> ContextEstimateGas<'a, 'b> {
+    pub fn new(state: &'b State<'a>, legacy: Legacy) -> Result<Self> {
+        let holder = 0;
+        let _state_holder = state.info_state_holder(holder, true)?;
 
         Ok(Self {
             state,
+            legacy,
+            tx_hash: H256::default(),
             holder,
-            data,
-            instr,
-            tx_hash: hash,
         })
     }
 }
 
-impl<'a, 'b> Context for ContextIterative<'a, 'b> {
+impl<'a, 'b> Context for ContextEstimateGas<'a, 'b> {
     fn tx(&self) -> Result<Tx> {
-        match self.instr {
-            Instruction::DoTxIterative => {
-                let (_, tx) = do_tx_iterative::args(self.data)?;
-                Tx::from_instruction(tx)
-            }
-            Instruction::DoTxHolderIterative => {
-                let (holder, hash) = do_tx_holder_iterative::args(self.data)?;
-                let mut bind = self.state.info_tx_holder(holder, false)?;
-                let info = bind.into_account_info();
-                tx_from_holder(&info, hash)
-            }
-            _ => unreachable!(),
-        }
+        let tx = Tx::from_legacy(self.legacy.clone());
+        Ok(tx)
     }
     fn save_iteration(&self, iteration: Iterations) -> Result<()> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
@@ -137,6 +103,27 @@ impl<'a, 'b> Context for ContextIterative<'a, 'b> {
     }
 
     fn gas_recipient(&self) -> Result<Option<H160>> {
-        gas_recipient(self.state)
+        Ok(None)
+    }
+
+    fn check_nonce(&self) -> bool {
+        false
+    }
+}
+
+impl AccountLock for ContextEstimateGas<'_, '_> {
+    fn lock(&self) -> Result<()> {
+        iterative_lock(self.state, self.holder)
+    }
+    fn locked(&self) -> Result<bool> {
+        // during transaction emulation accounts are not locked
+        Ok(true)
+    }
+    fn unlock(&self) -> Result<()> {
+        // it doesn't make sense for emulation
+        Ok(())
+    }
+    fn lock_new_one(&self) -> Result<()> {
+        Ok(())
     }
 }

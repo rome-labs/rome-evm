@@ -1,4 +1,5 @@
 use {
+    super::fake,
     crate::stubs::Stubs,
     rome_evm::{
         accounts,
@@ -26,10 +27,12 @@ pub struct Item {
     pub signer: bool,
     pub address: Option<H160>,
 }
+pub type Slots = BTreeMap<U256, bool>;
 pub struct State<'a> {
     pub client: Arc<RpcClient>,
     pub program_id: &'a Pubkey,
     pub accounts: RefCell<BTreeMap<Pubkey, Item>>,
+    pub storage: RefCell<BTreeMap<H160, Slots>>,
     pub signer: Option<Pubkey>,
     pub alloc: RefCell<usize>,
     pub dealloc: RefCell<usize>,
@@ -53,6 +56,7 @@ impl<'a> State<'a> {
             client,
             program_id,
             accounts: RefCell::new(BTreeMap::new()),
+            storage: RefCell::new(BTreeMap::new()),
             signer,
             alloc: RefCell::new(0),
             dealloc: RefCell::new(0),
@@ -61,14 +65,26 @@ impl<'a> State<'a> {
         };
 
         if let Some(signer) = signer {
-            let bind = state.load(&signer, None)?.ok_or(InvalidSigner)?;
-            let mut accounts = state.accounts.borrow_mut();
-            let item = accounts.get_mut(&bind.0).unwrap();
-            item.signer = true;
+            if signer != fake::ID {
+                let bind = state.load(&signer, None)?.ok_or(InvalidSigner)?;
+                state.set_signer(&bind.0);
+            } else {
+                // the fake signer is used to execute an estimate_gas request using the iterative_tx pipeline
+                let acc = Account {
+                    lamports: 0,
+                    data: vec![],
+                    owner: Pubkey::default(),
+                    executable: false,
+                    rent_epoch: 0,
+                };
+                state.insert(&(fake::ID, acc), None, false);
+                state.set_signer(&fake::ID);
+            }
         }
 
         Ok(state)
     }
+
     pub fn info_addr(&self, address: &H160, or_create: bool) -> Result<Bind> {
         let key = pda_balance(address, self.program_id).0;
         let mut bind = if let Some(bind) = self.load(&key, Some(*address))? {
@@ -80,7 +96,7 @@ impl<'a> State<'a> {
                 AccountState::offset(&info) + AccountState::size(&info)
             };
             let bind = self.create_pda(len, Balance, key)?;
-            self.insert(&bind, Some(*address));
+            self.insert(&bind, Some(*address), true);
             bind
         } else {
             return Err(BalanceAccountNotFound(key, *address));
@@ -95,7 +111,7 @@ impl<'a> State<'a> {
         let base = self.info_addr(address, or_create)?.0;
         let key = pda_storage(&base, index_be, self.program_id).0;
 
-        let (mut bind, subindex) = if let Some(bind) = self.load(&key, None)? {
+        let (mut bind, subindex) = if let Some(bind) = self.load(&key, Some(*address))? {
             (bind, subindex)
         } else if or_create {
             let len = {
@@ -104,7 +120,7 @@ impl<'a> State<'a> {
                 AddressTable::offset(&info) + AddressTable::size(&info)
             };
             let bind = self.create_pda(len, Storage, key)?;
-            self.insert(&bind, None);
+            self.insert(&bind, Some(*address), true);
             (bind, subindex)
         } else {
             return Err(StorageAccountNotFound(key, *address, *slot));
@@ -112,31 +128,43 @@ impl<'a> State<'a> {
 
         let info = bind.into_account_info();
         AccountType::is_ok(&info, Storage, self.program_id)?;
+
+        self.update_slots(address, slot, or_create);
         Ok((bind, subindex))
     }
-    pub fn load(&self, key: &Pubkey, address: Option<H160>) -> Result<Option<Bind>> {
-        let mut accounts = self.accounts.borrow_mut();
 
-        let bind = if let Some(item) = accounts.get(key) {
-            (*key, item.account.clone())
+    fn update_slots(&self, address: &H160, slot: &U256, writable: bool) {
+        let mut storage = self.storage.borrow_mut();
+
+        storage
+            .entry(*address)
+            .and_modify(|slots| {
+                slots
+                    .entry(*slot)
+                    .and_modify(|rw| *rw |= writable)
+                    .or_insert(writable);
+            })
+            .or_insert(BTreeMap::from([(*slot, writable)]));
+    }
+    pub fn load(&self, key: &Pubkey, address: Option<H160>) -> Result<Option<Bind>> {
+        let loaded = { self.accounts.borrow().get(key).cloned() };
+
+        let opt = if let Some(item) = loaded {
+            let bind = (*key, item.account);
+            Some(bind)
         } else if let Some(acc) = self
             .client
             .get_account_with_commitment(key, self.client.commitment())?
             .value
         {
-            let item = Item {
-                account: acc.clone(),
-                writable: false,
-                signer: false,
-                address,
-            };
-            accounts.insert(*key, item);
-            (*key, acc)
+            let bind = (*key, acc);
+            self.insert(&bind, address, false);
+            Some(bind)
         } else {
-            return Ok(None);
+            None
         };
 
-        Ok(Some(bind))
+        Ok(opt)
     }
     pub fn update(&self, bind: Bind) -> Result<()> {
         let mut accounts = self.accounts.borrow_mut();
@@ -145,10 +173,15 @@ impl<'a> State<'a> {
         item.writable = true;
         Ok(())
     }
-    pub fn insert(&self, bind: &Bind, address: Option<H160>) {
+    pub fn set_signer(&self, key: &Pubkey) {
+        let mut accounts = self.accounts.borrow_mut();
+        let item = accounts.get_mut(key).unwrap();
+        item.signer = true;
+    }
+    pub fn insert(&self, bind: &Bind, address: Option<H160>, writable: bool) {
         let item = Item {
             account: bind.1.clone(),
-            writable: true,
+            writable,
             signer: false,
             address,
         };
@@ -156,13 +189,18 @@ impl<'a> State<'a> {
         accounts.insert(bind.0, item);
     }
 
-    pub fn count_space(&self, old: usize, new: usize, typ: AccountType, key: &Pubkey) -> Result<()> {
-
+    pub fn count_space(
+        &self,
+        old: usize,
+        new: usize,
+        typ: AccountType,
+        key: &Pubkey,
+    ) -> Result<()> {
         let f = |len: usize, func: &dyn Fn(&State<'a>, usize) -> Result<()>| -> Result<()> {
             match typ {
-                New => return Err(Custom(format!("resizing of uninitialized account {}", key))),
-                Balance | Storage | AccountType::RoLock => func(&self, len),
-                _ => Ok(())
+                New => Err(Custom(format!("resizing of uninitialized account {}", key))),
+                Balance | Storage | AccountType::RoLock => func(self, len),
+                _ => Ok(()),
             }
         };
 
@@ -177,7 +215,7 @@ impl<'a> State<'a> {
         }
     }
     pub fn realloc(&self, bind: &mut Bind, len: usize) -> Result<()> {
-        assert!(bind.1.data.len() > 0);
+        assert!(!bind.1.data.is_empty());
         assert_eq!(&bind.1.owner, self.program_id());
 
         let typ = {
@@ -246,7 +284,7 @@ impl<'a> State<'a> {
                 TxHolder::offset(&info) + TxHolder::size(&info)
             };
             let bind = self.create_pda(len, TxHolder, key)?;
-            self.insert(&bind, None);
+            self.insert(&bind, None, true);
             bind
         } else {
             return Err(TxHolderAccountNotFound(key, index));
@@ -269,7 +307,7 @@ impl<'a> State<'a> {
                 StateHolder::offset(&info) + StateHolder::size(&info)
             };
             let bind = self.create_pda(len, StateHolder, key)?;
-            self.insert(&bind, None);
+            self.insert(&bind, None, true);
             bind
         } else {
             return Err(StateHolderAccountNotFound(key, index));
@@ -291,7 +329,7 @@ impl<'a> State<'a> {
                 RoLock::offset(&info)
             };
             let bind = self.create_pda(len, AccountType::RoLock, key)?;
-            self.insert(&bind, None);
+            self.insert(&bind, None, true);
             bind
         } else {
             return Err(RoLockAccountNotFound(key));
@@ -313,7 +351,7 @@ impl<'a> State<'a> {
                 accounts::SignerInfo::offset(&info) + accounts::SignerInfo::size(&info)
             };
             let bind = self.create_pda(len, SignerInfo, key)?;
-            self.insert(&bind, None);
+            self.insert(&bind, None, true);
             bind
         } else {
             return Err(SignerInfoAccountNotFound(key));

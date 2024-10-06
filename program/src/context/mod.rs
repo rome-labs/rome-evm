@@ -36,6 +36,9 @@ pub trait Context {
     fn is_tx_binded_to_holder(&self) -> Result<bool>;
     fn tx_hash(&self) -> H256;
     fn gas_recipient(&self) -> Result<Option<H160>>;
+    fn check_nonce(&self) -> bool {
+        true
+    }
 }
 
 pub fn tx_from_holder(info: &AccountInfo, hash: H256) -> Result<Tx> {

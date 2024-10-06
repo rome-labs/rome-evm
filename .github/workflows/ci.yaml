@@ -6,8 +6,9 @@ on:
 
 env:
   REF_NAME: ${{github.ref_name}}
-  TESTS_REF_NAME: production
-  ROME_SDK_REF_NAME: production
+  TESTS_REF_NAME: main 
+  ROME_SDK_REF_NAME: main 
+  ROME_APPS: main
 
 permissions:
   contents: read
@@ -26,21 +27,29 @@ jobs:
       - name: Check Docker Compose version
         run: docker-compose --version
 
-      # - name: 'Checkout rome-sdk repository'
-      #   uses: actions/checkout@master
-      #   with:
-      #     repository: rome-labs/rome-sdk
-      #     path: rome-sdk
-      #     ref: ${{env.ROME_SDK_REF_NAME}}
-      #     token: ${{ secrets.GIT_ROLLUP_TOKEN }}
+      - name: 'Checkout rome-sdk repository'
+        uses: actions/checkout@master
+        with:
+          repository: rome-labs/rome-sdk
+          path: rome-sdk
+          ref: ${{env.ROME_SDK_REF_NAME}}
+          token: ${{ secrets.GIT_ROLLUP_TOKEN }}
 
-      # - name: 'Checkout tests repository'
-      #   uses: actions/checkout@master
-      #   with:
-      #     repository: rome-labs/tests
-      #     path: tests
-      #     ref: ${{env.TESTS_REF_NAME}}
-      #     token: ${{ secrets.GIT_ROLLUP_TOKEN }}
+      - name: 'Checkout rome-apps repository'
+        uses: actions/checkout@master
+        with:
+          repository: rome-labs/rome-apps
+          path: rome-apps
+          ref: ${{env.ROME_APPS}}
+          token: ${{ secrets.GIT_ROLLUP_TOKEN }}
+
+      - name: 'Checkout tests repository'
+        uses: actions/checkout@master
+        with:
+          repository: rome-labs/tests
+          path: tests
+          ref: ${{env.TESTS_REF_NAME}}
+          token: ${{ secrets.GIT_ROLLUP_TOKEN }}
 
       - name: 'Checkout rome-evm repository'
         uses: actions/checkout@v4
@@ -60,8 +69,8 @@ jobs:
           context: .
           push: true
           file: rome-evm/ci/Builder.Dockerfile
-          tags: romelabs/rome-evm:${{env.REF_NAME}}
-          labels: romelabs/rome-evm:${{env.REF_NAME}}
+          tags: romelabs/rome-evm-builder:${{env.REF_NAME}}
+          labels: romelabs/rome-evm-builder:${{env.REF_NAME}}
 
       - name: 'Build test validator'
         uses: docker/build-push-action@v4.0.0
@@ -73,7 +82,7 @@ jobs:
           labels: romelabs/test-validator:${{env.REF_NAME}}
           build-args: |
             "BUILDER_REF_NAME=${{env.REF_NAME}}"
-            "IMAGE_NAME=romelabs/rome-evm"
+            "IMAGE_NAME=romelabs/rome-evm-builder"
 
       - name: 'Build tests image'
         uses: docker/build-push-action@v4.0.0
@@ -84,13 +93,20 @@ jobs:
           tags: romelabs/tests:${{env.TESTS_REF_NAME}}
           labels: romelabs/tests:${{env.TESTS_REF_NAME}}
 
-      - name: 'rm solana container'
-        run: docker-compose -f rome-evm/ci/docker-compose.yml rm solana
       - name: 'Up tests'
         run: docker-compose -f rome-evm/ci/docker-compose.yml up tests
 
-      # - name: 'Up Uniswap-v2-core tests'
-      #   run: docker-compose -f rome-evm/ci/docker-compose.yml up uniswap-v2-core
+      - name: 'Build rome-apps image'
+        uses: docker/build-push-action@v4.0.0
+        with:
+          context: .
+          push: false
+          file: rome-apps/docker/Dockerfile
+          tags: romelabs/rome-apps:${{env.ROME_APPS}}
+          labels: romelabs/rome-apps:${{env.ROME_APPS}}
+
+      - name: 'Up Uniswap-v2-core tests'
+        run: docker-compose -f rome-evm/ci/docker-compose.yml up uniswap-v2-core
 
       - name: 'Dump docker logs'
         uses: jwalton/gh-docker-logs@v2
@@ -123,9 +139,9 @@ jobs:
           ( github.ref_name == 'main' )
         run: |
           
-          docker pull romelabs/rome-evm:${REF_NAME}
-          docker tag romelabs/rome-evm:${REF_NAME} romelabs/rome-evm:latest
-          docker push romelabs/rome-evm:latest
+          docker pull romelabs/rome-evm-builder:${REF_NAME}
+          docker tag romelabs/rome-evm-builder:${REF_NAME} romelabs/rome-evm-builder:latest
+          docker push romelabs/rome-evm-builder:latest
           
           docker pull romelabs/test-validator:${REF_NAME}
           docker tag romelabs/test-validator:${REF_NAME} romelabs/test-validator:latest

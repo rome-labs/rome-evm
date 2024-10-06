@@ -139,8 +139,8 @@ pub enum RomeProgramError {
     #[error("StateHolder's iteration cast error: {0}")]
     IterationCastError(String),
 
-    #[error("Invalid transaction nonce for address: {0}")]
-    InvalidTxNonce(H160),
+    #[error("Invalid transaction nonce for address: {0} {1} {2}")]
+    InvalidTxNonce(H160, u64, u64),
 
     #[error("Allocation/deallocation error: {0}")]
     AllocationError(String),
