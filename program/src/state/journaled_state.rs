@@ -29,6 +29,7 @@ pub struct JournaledState<'a, T: Origin + Allocate> {
     pub origin: Option<H160>,
     pub gas_limit: Option<U256>,
     pub gas_price: Option<U256>,
+    pub gas_recipient: Option<H160>,
 }
 
 impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
@@ -45,6 +46,7 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
             origin: None,
             gas_limit: None,
             gas_price: None,
+            gas_recipient: None,
         };
 
         Ok(journaled_state)
@@ -58,7 +60,7 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
 
     pub fn transfer(&mut self, from: &H160, to: &H160, balance: &U256) -> Result<()> {
         if balance.is_zero() {
-            return Ok(())
+            return Ok(());
         }
 
         if self.balance(*from) < *balance {
@@ -142,6 +144,7 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
         self.origin.serialize(into)?;
         self.gas_limit.serialize(into)?;
         self.gas_price.serialize(into)?;
+        self.gas_recipient.serialize(into)?;
         Ok(())
     }
 
@@ -154,6 +157,7 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
         let origin: Option<H160> = BorshDeserialize::deserialize(from)?;
         let gas_limit: Option<U256> = BorshDeserialize::deserialize(from)?;
         let gas_price: Option<U256> = BorshDeserialize::deserialize(from)?;
+        let gas_recipient: Option<H160> = BorshDeserialize::deserialize(from)?;
 
         Ok(Self {
             state,
@@ -165,6 +169,7 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
             origin,
             gas_limit,
             gas_price,
+            gas_recipient,
         })
     }
 

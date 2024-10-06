@@ -1,8 +1,7 @@
-use crate::{GAS_RECIPIENT, GAS_VALUE};
 use {
-    super::{MachineEthCall, Snapshot},
+    super::Snapshot,
     crate::{
-        config::{EXIT_REASON, REVERT_ERROR, REVERT_PANIC},
+        config::{EXIT_REASON, GAS_RECIPIENT, GAS_VALUE, REVERT_ERROR, REVERT_PANIC},
         context::{account_lock::AccountLock, Context},
         error::{Result, RomeProgramError::*},
         origin::Origin,
@@ -15,7 +14,7 @@ use {
     },
     evm::{Capture, ExitFatal, ExitReason, Handler, Resolve, H160, U256},
     solana_program::{log::sol_log_data, msg},
-    std::{any::TypeId, mem::size_of},
+    std::mem::size_of,
 };
 
 pub struct Vm<'a, T: Origin + Allocate, M, L: AccountLock + Context> {
@@ -150,10 +149,11 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         msg!("from {}", &hex::encode(from));
 
         // TODO add test to eliminate the possibility of repeated transaction execution
-        if TypeId::of::<M>() != TypeId::of::<MachineEthCall>()
-            && self.handler.nonce(from) != tx.nonce().into()
-        {
-            return Err(InvalidTxNonce(from));
+        if self.context.check_nonce() {
+            let nonce = self.handler.nonce(from);
+            if nonce != tx.nonce().into() {
+                return Err(InvalidTxNonce(from, tx.nonce(), nonce.as_u64()));
+            }
         }
 
         let snapshot = if tx.to().is_some() {
@@ -172,6 +172,7 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         self.handler.origin = Some(tx.from());
         self.handler.gas_limit = Some(tx.gas_limit());
         self.handler.gas_price = Some(tx.gas_price());
+        self.handler.gas_recipient = self.context.gas_recipient()?;
 
         Ok(snapshot)
     }
@@ -404,35 +405,28 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         }
     }
 
-    pub fn log_gas_transfer(&self, sum: U256, to: Option<H160>) {
+    pub fn log_gas_transfer(&self) {
         let mut sum_be = [0_u8; 32];
-        sum.to_big_endian(&mut sum_be);
+        self.handler.gas_limit.unwrap().to_big_endian(&mut sum_be);
 
         sol_log_data(&[GAS_VALUE, &sum_be]);
-        if let Some(to) = to {
+        if let Some(to) = self.handler.gas_recipient {
             sol_log_data(&[GAS_RECIPIENT, to.as_bytes()]);
         }
     }
 
     pub fn gas_transfer(&mut self) -> Result<()> {
-        let to = self.context.gas_recipient()?;
-        if to.is_none() {
-            self.log_gas_transfer(U256::zero(), None);
-            return Ok(());
+        let gas_used = self.handler.gas_limit.unwrap();
+
+        if let Some(to) = self.handler.gas_recipient {
+            let gas_price = self.handler.gas_price.unwrap();
+            let from = self.handler.origin.unwrap();
+
+            let tx_price = gas_used.checked_mul(gas_price).ok_or(CalculationOverflow)?;
+
+            self.handler.transfer(&from, &to, &tx_price)?;
         }
 
-        let to = to.unwrap();
-
-        let gas_limit = self.handler.gas_limit.unwrap();
-        let gas_price = self.handler.gas_price.unwrap();
-        let from = self.handler.origin.unwrap();
-
-        let sum = gas_limit
-            .checked_mul(gas_price)
-            .ok_or(CalculationOverflow)?;
-
-        self.handler.transfer(&from, &to, &sum)?;
-        self.log_gas_transfer(sum, Some(to));
         Ok(())
     }
 }

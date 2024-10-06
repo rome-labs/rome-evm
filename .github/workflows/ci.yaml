@@ -6,8 +6,9 @@ on:
 
 env:
   REF_NAME: ${{github.ref_name}}
-  TESTS_REF_NAME: production
-  ROME_SDK_REF_NAME: production
+  TESTS_REF_NAME: master 
+  ROME_SDK_REF_NAME: main 
+  ROME_APPS: main
 
 permissions:
   contents: read
@@ -29,23 +30,31 @@ jobs:
       - name: 'Checkout rome-sdk repository'
         uses: actions/checkout@master
         with:
-          repository: rome-protocol/rome-sdk
+          repository: rome-labs/rome-sdk
           path: rome-sdk
           ref: ${{env.ROME_SDK_REF_NAME}}
+          token: ${{ secrets.GIT_ROLLUP_TOKEN }}
+
+      - name: 'Checkout rome-apps repository'
+        uses: actions/checkout@master
+        with:
+          repository: rome-labs/rome-apps
+          path: rome-apps
+          ref: ${{env.ROME_APPS}}
           token: ${{ secrets.GIT_ROLLUP_TOKEN }}
 
       - name: 'Checkout tests repository'
         uses: actions/checkout@master
         with:
-          repository: rome-protocol/tests
+          repository: rome-labs/tests
           path: tests
           ref: ${{env.TESTS_REF_NAME}}
           token: ${{ secrets.GIT_ROLLUP_TOKEN }}
 
-      - name: 'Checkout rome-evm-private repository'
+      - name: 'Checkout rome-evm repository'
         uses: actions/checkout@v4
         with:
-          path: rome-evm-private
+          path: rome-evm
           token: ${{ secrets.GIT_ROLLUP_TOKEN }}
 
       - name: 'Login to Docker Hub'
@@ -59,21 +68,21 @@ jobs:
         with:
           context: .
           push: true
-          file: rome-evm-private/ci/Builder.Dockerfile
-          tags: romeprotocol/rome-evm-builder:${{env.REF_NAME}}
-          labels: romeprotocol/rome-evm-builder:${{env.REF_NAME}}
+          file: rome-evm/ci/Builder.Dockerfile
+          tags: romelabs/rome-evm-builder:${{env.REF_NAME}}
+          labels: romelabs/rome-evm-builder:${{env.REF_NAME}}
 
       - name: 'Build test validator'
         uses: docker/build-push-action@v4.0.0
         with:
           context: .
           push: true
-          file: rome-evm-private/ci/TestValidator.Dockerfile
-          tags: romeprotocol/test-validator:${{env.REF_NAME}}
-          labels: romeprotocol/test-validator:${{env.REF_NAME}}
+          file: rome-evm/ci/TestValidator.Dockerfile
+          tags: romelabs/test-validator:${{env.REF_NAME}}
+          labels: romelabs/test-validator:${{env.REF_NAME}}
           build-args: |
             "BUILDER_REF_NAME=${{env.REF_NAME}}"
-            "IMAGE_NAME=romeprotocol/rome-evm-builder"
+            "IMAGE_NAME=romelabs/rome-evm-builder"
 
       - name: 'Build tests image'
         uses: docker/build-push-action@v4.0.0
@@ -81,16 +90,23 @@ jobs:
           context: .
           push: false
           file: tests/ci/Dockerfile
-          tags: romeprotocol/tests:${{env.TESTS_REF_NAME}}
-          labels: romeprotocol/tests:${{env.TESTS_REF_NAME}}
+          tags: romelabs/tests:${{env.TESTS_REF_NAME}}
+          labels: romelabs/tests:${{env.TESTS_REF_NAME}}
 
-      - name: 'rm solana container'
-        run: docker-compose -f rome-evm-private/ci/docker-compose.yml rm solana
       - name: 'Up tests'
-        run: docker-compose -f rome-evm-private/ci/docker-compose.yml up tests
+        run: docker-compose -f rome-evm/ci/docker-compose.yml up tests
+
+      - name: 'Build rome-apps image'
+        uses: docker/build-push-action@v4.0.0
+        with:
+          context: .
+          push: false
+          file: rome-apps/docker/Dockerfile
+          tags: romelabs/rome-apps:${{env.ROME_APPS}}
+          labels: romelabs/rome-apps:${{env.ROME_APPS}}
 
       - name: 'Up Uniswap-v2-core tests'
-        run: docker-compose -f rome-evm-private/ci/docker-compose.yml up uniswap-v2-core
+        run: docker-compose -f rome-evm/ci/docker-compose.yml up uniswap-v2-core
 
       - name: 'Dump docker logs'
         uses: jwalton/gh-docker-logs@v2
@@ -116,18 +132,18 @@ jobs:
           fi
 
       - name: 'Down docker-compose'
-        run: docker-compose -f rome-evm-private/ci/docker-compose.yml down --rmi all -v
+        run: docker-compose -f rome-evm/ci/docker-compose.yml down --rmi all -v
 
       - name: 'Set latest tag'
         if: |
           ( github.ref_name == 'master' )
         run: |
           
-          docker pull romeprotocol/rome-evm-builder:${REF_NAME}
-          docker tag romeprotocol/rome-evm-builder:${REF_NAME} romeprotocol/rome-evm-builder:latest
-          docker push romeprotocol/rome-evm-builder:latest
+          docker pull romelabs/rome-evm-builder:${REF_NAME}
+          docker tag romelabs/rome-evm-builder:${REF_NAME} romelabs/rome-evm-builder:latest
+          docker push romelabs/rome-evm-builder:latest
           
-          docker pull romeprotocol/test-validator:${REF_NAME}
-          docker tag romeprotocol/test-validator:${REF_NAME} romeprotocol/test-validator:latest
-          docker push romeprotocol/test-validator:latest
+          docker pull romelabs/test-validator:${REF_NAME}
+          docker tag romelabs/test-validator:${REF_NAME} romelabs/test-validator:latest
+          docker push romelabs/test-validator:latest
       

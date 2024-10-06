@@ -53,7 +53,10 @@ impl Context for ContextEthCall {
         unreachable!()
     }
     fn gas_recipient(&self) -> Result<Option<H160>> {
-        unreachable!()
+        Ok(None)
+    }
+    fn check_nonce(&self) -> bool {
+        false
     }
 }
 

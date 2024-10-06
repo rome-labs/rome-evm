@@ -72,6 +72,7 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineAtomic>
                 self.return_value = Some(return_value);
                 self.exit_reason = Some(reason);
                 self.handler.commit()?;
+                self.log_gas_transfer();
                 self.log_exit_reason()?;
                 Exit
             }

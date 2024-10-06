@@ -1,6 +1,6 @@
 use {
-    super::{do_tx_iterative::iterative_transaction, Emulation},
-    crate::Instruction::DoTxHolderIterative,
+    super::{do_tx_iterative::iterative_tx, Emulation},
+    crate::{context::ContextIterative, state::State, Instruction::DoTxHolderIterative},
     rome_evm::{
         error::{Result, RomeProgramError::*},
         H256,
@@ -30,5 +30,9 @@ pub fn do_tx_holder_iterative<'a>(
     client: Arc<RpcClient>,
 ) -> Result<Emulation> {
     msg!("Instruction: Iterative transaction from holder");
-    iterative_transaction(program_id, data, signer, client, DoTxHolderIterative)
+
+    let state = State::new(program_id, Some(*signer), Arc::clone(&client))?;
+    let context = ContextIterative::new(&state, data, DoTxHolderIterative)?;
+
+    iterative_tx(&state, context)
 }

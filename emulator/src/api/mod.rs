@@ -4,8 +4,10 @@ pub mod do_tx_holder;
 pub mod do_tx_holder_iterative;
 pub mod do_tx_iterative;
 mod eth_call;
+mod eth_estimate_gas;
 mod eth_get_balance;
 mod eth_get_code;
+mod eth_get_storage_at;
 mod eth_get_tx_count;
 mod reg_signer;
 mod transmit_tx;
@@ -16,19 +18,21 @@ pub use do_tx_holder::do_tx_holder;
 pub use do_tx_holder_iterative::do_tx_holder_iterative;
 pub use do_tx_iterative::do_tx_iterative;
 pub use eth_call::eth_call;
+pub use eth_estimate_gas::eth_estimate_gas;
 pub use eth_get_balance::eth_get_balance;
 pub use eth_get_code::eth_get_code;
+pub use eth_get_storage_at::eth_get_storage_at;
 pub use eth_get_tx_count::eth_get_tx_count;
 pub use reg_signer::reg_signer;
 pub use transmit_tx::transmit_tx;
 
 use {
-    crate::state::{Item, State},
+    crate::state::{Item, Slots, State},
     rome_evm::{
         accounts::{AccountState, AccountType, Data},
         error::{Result, RomeProgramError::*},
         state::origin::Origin,
-        ExitReason, SIG_VERIFY_COST,
+        ExitReason, H160, SIG_VERIFY_COST,
     },
     solana_program::{
         account_info::IntoAccountInfo, msg, pubkey::Pubkey, rent::Rent, sysvar::Sysvar,
@@ -45,6 +49,7 @@ pub struct Vm {
 
 pub struct Emulation {
     pub accounts: BTreeMap<Pubkey, Item>,
+    pub storage: BTreeMap<H160, Slots>,
     pub vm: Option<Vm>,
     pub allocated: usize,
     pub deallocated: usize,
@@ -66,6 +71,8 @@ impl Emulation {
         alloc_state: usize,
         dealloc_state: usize,
     ) -> Result<Self> {
+        let gas = Emulation::gas(alloc_state, dealloc_state, iter_count)?;
+
         msg!(">> emulation results:");
         msg!("steps_executed: {}", steps_executed);
         msg!("nubmer of iterations: {}", iter_count);
@@ -74,6 +81,30 @@ impl Emulation {
         msg!("allocated_state: {}", alloc_state);
         msg!("deallocated_state: {}", dealloc_state);
         msg!("exit_reason: {:?}", exit_reason);
+        msg!("gas: {:?}", gas);
+
+        Emulation::log_accounts(state)?;
+
+        let vm = Vm {
+            exit_reason: exit_reason.ok_or(VmFault("exit_reason expected".to_string()))?,
+            return_value,
+            steps_executed,
+            iteration_count: iter_count,
+        };
+
+        Ok(Self {
+            accounts: state.accounts.borrow().clone(),
+            storage: state.storage.borrow().clone(),
+            vm: Some(vm),
+            allocated: alloc,
+            deallocated: dealloc,
+            allocated_state: alloc_state,
+            deallocated_state: dealloc_state,
+            gas,
+        })
+    }
+
+    fn log_accounts(state: &State) -> Result<()> {
         msg!("accounts:");
         msg!("Pubkey | is_writable | is_signer | AccountType | data.len() | {address} ");
         for (key, item) in state.accounts.borrow().iter() {
@@ -115,24 +146,7 @@ impl Emulation {
             }
         }
 
-        let vm = Vm {
-            exit_reason: exit_reason.ok_or(VmFault("exit_reason expected".to_string()))?,
-            return_value,
-            steps_executed,
-            iteration_count: iter_count,
-        };
-
-        let gas = Emulation::gas(alloc_state, dealloc_state, iter_count)?;
-
-        Ok(Self {
-            accounts: state.accounts.borrow().clone(),
-            vm: Some(vm),
-            allocated: alloc,
-            deallocated: dealloc,
-            allocated_state: alloc_state,
-            deallocated_state: dealloc_state,
-            gas,
-        })
+        Ok(())
     }
 
     pub fn without_vm(state: &State) -> Result<Self> {
@@ -142,6 +156,7 @@ impl Emulation {
 
         Ok(Self {
             accounts: state.accounts.borrow().clone(),
+            storage: state.storage.borrow().clone(),
             vm: None,
             allocated: state.allocated(),
             deallocated: state.deallocated(),
@@ -157,4 +172,8 @@ impl Emulation {
 
         Ok(rent + SIG_VERIFY_COST * iter_count)
     }
+}
+
+pub mod fake {
+    solana_program::declare_id!("11111111111111111111111111111112");
 }
