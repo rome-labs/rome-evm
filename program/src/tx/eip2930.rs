@@ -61,8 +61,8 @@ impl Base for Eip2930 {
     fn recovery_id(&self) -> crate::error::Result<u8> {
         Ok(self.recovery_id)
     }
-    fn chain_id(&self) -> Option<u64> {
-        Some(self.chain_id.as_u64())
+    fn chain_id(&self) -> u64 {
+        self.chain_id.as_u64()
     }
     fn from(&self) -> H160 {
         self.from

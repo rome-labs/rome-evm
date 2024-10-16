@@ -3,7 +3,6 @@
 members = [
     "emulator",
     "program",
-    "initializer"
 ]
 exclude = [
     "evm"
@@ -24,5 +23,5 @@ ripemd = "0.1"
 borsh = "0.9.3"
 borsh-derive = "0.9.3"
 # evm
-evm = { git = "https://github.com/rome-protocol/evm.git", branch = "master"}
+evm = { git = "https://github.com/rome-labs/evm.git", branch = "master"}
  

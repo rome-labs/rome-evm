@@ -1,19 +1,18 @@
 use {
-    super::{account_lock::AccountLock, tx_from_holder, Context},
+    super::{account_lock::AccountLock, Context},
     crate::{
         accounts::Iterations,
         accounts::{Data, Holder, StateHolder},
-        api::{do_tx_holder_iterative, do_tx_iterative},
         context::gas_recipient,
         error::Result,
         state::{origin::Origin, Allocate, JournaledState},
         tx::tx::Tx,
         vm::{vm_iterative::MachineIterative, Snapshot, Vm},
-        Instruction, State,
+        State,
     },
     borsh::{BorshDeserialize, BorshSerialize},
     evm::{H160, H256},
-    solana_program::{account_info::AccountInfo, keccak},
+    solana_program::account_info::AccountInfo,
 };
 
 pub struct ContextIterative<'a, 'b> {
@@ -21,32 +20,19 @@ pub struct ContextIterative<'a, 'b> {
     pub origin_accounts: &'a [AccountInfo<'a>],
     pub lock_overrides: &'a [u8],
     pub state_holder: &'a AccountInfo<'a>,
-    pub data: &'a [u8],
-    pub instr: Instruction,
     pub tx_hash: H256,
+    pub tx: Tx,
 }
 
 impl<'a, 'b> ContextIterative<'a, 'b> {
     pub fn new(
         state: &'b State<'a>,
         accounts: &'a [AccountInfo<'a>],
-        data: &'a [u8],
-        instr: Instruction,
+        holder: u64,
+        lock_overrides: &'a [u8],
+        tx: Tx,
+        tx_hash: H256,
     ) -> Result<Self> {
-        let (holder, lock_overrides, hash) = match instr {
-            Instruction::DoTxIterative => {
-                let (holder, lock_overrides, tx) = do_tx_iterative::args(data)?;
-                let hash = keccak::hash(tx);
-
-                (holder, lock_overrides, H256::from(hash.to_bytes()))
-            }
-            Instruction::DoTxHolderIterative => {
-                let (holder, hash, lock_overrides) = do_tx_holder_iterative::args(data)?;
-                (holder, lock_overrides, hash)
-            }
-            _ => unreachable!(),
-        };
-
         let state_holder = state.info_state_holder(holder, true)?;
 
         Ok(Self {
@@ -54,27 +40,15 @@ impl<'a, 'b> ContextIterative<'a, 'b> {
             origin_accounts: accounts,
             lock_overrides,
             state_holder,
-            data,
-            instr,
-            tx_hash: hash,
+            tx_hash,
+            tx,
         })
     }
 }
 
 impl<'a, 'b> Context for ContextIterative<'a, 'b> {
-    fn tx(&self) -> Result<Tx> {
-        match self.instr {
-            Instruction::DoTxIterative => {
-                let (_, _, tx) = do_tx_iterative::args(self.data)?;
-                Tx::from_instruction(tx)
-            }
-            Instruction::DoTxHolderIterative => {
-                let (holder, hash, _) = do_tx_holder_iterative::args(self.data)?;
-                let info = self.state.info_tx_holder(holder, false)?;
-                tx_from_holder(info, hash)
-            }
-            _ => unreachable!(),
-        }
+    fn tx(&self) -> &Tx {
+        &self.tx
     }
     fn save_iteration(&self, iteration: Iterations) -> Result<()> {
         save_iteration_impl(self.state_holder, iteration)

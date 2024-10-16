@@ -4,7 +4,7 @@ use {
     rome_evm::{api::transmit_tx::args, error::Result, Data, Holder, TxHolder},
     solana_client::rpc_client::RpcClient,
     solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey, system_program},
-    std::{cell::RefMut, sync::Arc},
+    std::sync::Arc,
 };
 
 pub fn transmit_tx<'a>(
@@ -14,32 +14,28 @@ pub fn transmit_tx<'a>(
     client: Arc<RpcClient>,
 ) -> Result<Emulation> {
     msg!("Instruction: Transmit tx");
-    let (index, offset, ix_hash, tx) = args(data)?;
 
-    let state = State::new(program_id, Some(*signer), client)?;
-    let mut bind = state.info_tx_holder(index, true)?;
+    let (holder, from, ix_hash, chain, tx) = args(data)?;
+    let state = State::new(program_id, Some(*signer), client, chain)?;
+    let mut bind = state.info_tx_holder(holder, true)?;
 
-    let (available, holder_offset, hash) = {
+    let (filled_len, header, hash) = {
         let info = bind.into_account_info();
         let len = Holder::from_account(&info)?.len();
-        let holder_offset = Holder::offset(&info);
+        let header = Holder::offset(&info);
         let hash = TxHolder::from_account(&info)?.hash;
-        (len, holder_offset, hash)
+        (len, header, hash)
     };
 
     let _sys_acc = state.load(&system_program::ID, None)?;
-
-    let required = offset + tx.len();
-    if hash != ix_hash || required > available {
-        state.realloc(&mut bind, holder_offset + required)?;
+    // TODO: the client side should implement the holder filling with taking into account holder header allocation
+    let to = from + tx.len();
+    if hash != ix_hash || to > filled_len {
+        state.realloc(&mut bind, header + to)?;
     }
-
     {
         let info = bind.into_account_info();
-        TxHolder::from_account_mut(&info)?.hash = hash;
-        let holder = Holder::from_account_mut(&info)?;
-        let mut location = RefMut::map(holder, |a| &mut a[offset..required]);
-        location.copy_from_slice(tx);
+        Holder::fill(&info, hash, from, to, tx)?;
     }
     state.update(bind)?;
 

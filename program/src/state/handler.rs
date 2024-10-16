@@ -1,8 +1,6 @@
 use {
     super::{precompiled_contract, JournaledState},
-    crate::{
-        config::*, origin::Origin, precompile::built_in_contract, state::Allocate, state::Diff,
-    },
+    crate::{origin::Origin, precompile::built_in_contract, state::Allocate, state::Diff},
     evm::{
         Capture, Context, CreateScheme, ExitError, ExitReason, Handler, Machine, Opcode, Stack,
         Transfer, H160, H256, U256,
@@ -138,7 +136,7 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
     }
 
     fn chain_id(&self) -> U256 {
-        U256::from(CHAIN_ID)
+        U256::from(self.state.chain_id())
     }
 
     fn set_storage(&mut self, address: H160, index: U256, value: U256) -> Result<(), ExitError> {

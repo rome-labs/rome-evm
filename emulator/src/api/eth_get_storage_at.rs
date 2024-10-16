@@ -1,7 +1,7 @@
 use {
     crate::state::State,
     rome_evm::{
-        error::{Result, RomeProgramError::StorageAccountNotFound},
+        error::{Result, RomeProgramError::AccountNotFound},
         origin::Origin,
         H160, U256,
     },
@@ -15,13 +15,14 @@ pub fn eth_get_storage_at<'a>(
     address: &'a H160,
     slot: &'a U256,
     client: Arc<RpcClient>,
+    chain: u64,
 ) -> Result<U256> {
     msg!("eth_getStorage_at");
-    let state = State::new(program_id, None, client)?;
+    let state = State::new(program_id, None, client, chain)?;
 
     let value = match state.storage(address, slot) {
         Ok(x) => x.unwrap_or(U256::zero()),
-        Err(StorageAccountNotFound(_, _, _)) => U256::zero(),
+        Err(AccountNotFound(_, _)) => U256::zero(),
         Err(e) => return Err(e),
     };
 

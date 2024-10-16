@@ -1,13 +1,10 @@
 use {
     super::Emulation,
-    crate::{
-        state::State,
-        ContextAtomic,
-        Instruction::{self, DoTx},
-    },
+    crate::{state::State, ContextAtomic},
     rome_evm::{
         error::Result,
         origin::Origin,
+        tx::tx::Tx,
         vm::{self, vm_atomic::MachineAtomic, Execute},
     },
     solana_client::rpc_client::RpcClient,
@@ -15,15 +12,20 @@ use {
     std::sync::Arc,
 };
 
-pub fn atomic_transaction<'a>(
+pub fn do_tx<'a>(
     program_id: &'a Pubkey,
     data: &'a [u8],
     signer: &'a Pubkey,
     client: Arc<RpcClient>,
-    instruction: Instruction,
 ) -> Result<Emulation> {
-    let state = State::new(program_id, Some(*signer), client)?;
-    let context = ContextAtomic::new(&state, data, instruction);
+    msg!("Instruction: Atomic transaction");
+    let tx = Tx::from_instruction(data)?;
+    let state = State::new(program_id, Some(*signer), client, tx.chain_id())?;
+    atomic_transaction(state, tx)
+}
+
+pub fn atomic_transaction(state: State, tx: Tx) -> Result<Emulation> {
+    let context = ContextAtomic::new(&state, tx);
     let mut vm = vm::Vm::new_atomic(&state, &context)?;
     vm.consume(MachineAtomic::Lock)?;
 
@@ -40,14 +42,4 @@ pub fn atomic_transaction<'a>(
     );
 
     report
-}
-
-pub fn do_tx<'a>(
-    program_id: &'a Pubkey,
-    data: &'a [u8],
-    signer: &'a Pubkey,
-    client: Arc<RpcClient>,
-) -> Result<Emulation> {
-    msg!("Instruction: Atomic transaction");
-    atomic_transaction(program_id, data, signer, client, DoTx)
 }

@@ -7,7 +7,7 @@ use {
         Holder,
     },
     evm::H256,
-    solana_program::{account_info::AccountInfo, keccak, msg},
+    solana_program::{account_info::AccountInfo, keccak},
     std::{
         cell::{Ref, RefMut},
         mem::size_of,
@@ -35,9 +35,6 @@ impl TxHolder {
         if self.hash == tx_hash && ix_hash == tx_hash {
             Ok(())
         } else {
-            msg!("{}", self.hash);
-            msg!("{}", tx_hash);
-            msg!("{}", ix_hash);
             Err(InvalidHolderHash(*info.key))
         }
     }

@@ -4,6 +4,7 @@ mod address_table;
 mod code;
 mod holder;
 mod lock;
+mod owner_info;
 mod ro_lock;
 mod signer_info;
 mod state_holder;
@@ -17,6 +18,7 @@ pub use address_table::*;
 pub use code::Code;
 pub use holder::Holder;
 pub use lock::{Lock, LockType};
+pub use owner_info::OwnerInfo;
 pub use ro_lock::RoLock;
 pub use signer_info::SignerInfo;
 pub use state_holder::{Iterations, StateHolder};
@@ -127,4 +129,13 @@ fn cast_slice_mut<'a, T>(
     });
 
     Ok(slice)
+}
+
+fn slise_len<T: Data>(info: &AccountInfo) -> usize {
+    let offset = T::offset(info);
+    let mut len = info.data.borrow().len();
+    assert!(len >= offset);
+    len -= offset;
+    assert!(len % size_of::<T>() == 0);
+    len / size_of::<T>()
 }

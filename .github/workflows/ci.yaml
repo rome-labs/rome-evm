@@ -67,21 +67,9 @@ jobs:
         with:
           context: .
           push: true
-          file: rome-evm/ci/Builder.Dockerfile
-          tags: romelabs/rome-evm-builder:${{env.REF_NAME}}
-          labels: romelabs/rome-evm-builder:${{env.REF_NAME}}
-
-      - name: 'Build test validator'
-        uses: docker/build-push-action@v4.0.0
-        with:
-          context: .
-          push: true
-          file: rome-evm/ci/TestValidator.Dockerfile
-          tags: romelabs/test-validator:${{env.REF_NAME}}
-          labels: romelabs/test-validator:${{env.REF_NAME}}
-          build-args: |
-            "BUILDER_REF_NAME=${{env.REF_NAME}}"
-            "IMAGE_NAME=romelabs/rome-evm-builder"
+          file: rome-evm/ci/Dockerfile
+          tags: romelabs/rome-evm:${{env.REF_NAME}}
+          labels: romelabs/rome-evm:${{env.REF_NAME}}
 
       - name: 'Build tests image'
         uses: docker/build-push-action@v4.0.0
@@ -138,11 +126,7 @@ jobs:
           ( github.ref_name == 'main' )
         run: |
           
-          docker pull romelabs/rome-evm-builder:${REF_NAME}
-          docker tag romelabs/rome-evm-builder:${REF_NAME} romelabs/rome-evm-builder:latest
-          docker push romelabs/rome-evm-builder:latest
-          
-          docker pull romelabs/test-validator:${REF_NAME}
-          docker tag romelabs/test-validator:${REF_NAME} romelabs/test-validator:latest
-          docker push romelabs/test-validator:latest
+          docker pull romelabs/rome-evm:${REF_NAME}
+          docker tag romelabs/rome-evm:${REF_NAME} romelabs/rome-evm:latest
+          docker push romelabs/rome-evm:latest
       

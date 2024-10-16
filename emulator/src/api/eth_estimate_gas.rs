@@ -13,7 +13,7 @@ pub fn eth_estimate_gas(
     client: Arc<RpcClient>,
 ) -> Result<Emulation> {
     msg!(">> eth_estimateGas emulator started ..");
-    let state = State::new(program_id, Some(fake::ID), Arc::clone(&client))?;
+    let state = State::new(program_id, Some(fake::ID), Arc::clone(&client), legacy.chain_id.as_u64())?;
     let context = ContextEstimateGas::new(&state, legacy)?;
 
     let emulation = iterative_tx(&state, context);

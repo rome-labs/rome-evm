@@ -19,7 +19,7 @@ use {
     solana_program::account_info::IntoAccountInfo,
 };
 
-fn gas_recipient(state: &State) -> Result<Option<H160>> {
+pub fn gas_recipient(state: &State) -> Result<Option<H160>> {
     let signer = state.signer.unwrap();
     if let Ok(mut bind) = state.info_signer_info(&signer, false) {
         let info = bind.into_account_info();

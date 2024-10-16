@@ -1,39 +1,29 @@
 use {
-    super::{gas_recipient, tx_from_holder, AccountLock, Context},
+    super::{gas_recipient, AccountLock, Context},
     crate::{
         accounts::Iterations,
-        api::do_tx_holder,
         error::Result,
         state::{origin::Origin, Allocate},
         tx::tx::Tx,
         vm::{vm_iterative::MachineIterative, Vm},
-        Instruction, State,
+        State,
     },
     evm::{H160, H256},
 };
 
 pub struct ContextAtomic<'a, 'b> {
     pub state: &'b State<'a>,
-    pub data: &'a [u8],
-    pub instr: Instruction,
+    pub tx: Tx,
 }
 impl<'a, 'b> ContextAtomic<'a, 'b> {
-    pub fn new(state: &'b State<'a>, data: &'a [u8], instr: Instruction) -> Self {
-        Self { state, data, instr }
+    pub fn new(state: &'b State<'a>, tx: Tx) -> Self {
+        Self { state, tx }
     }
 }
 
 impl<'a, 'b> Context for ContextAtomic<'a, 'b> {
-    fn tx(&self) -> Result<Tx> {
-        match self.instr {
-            Instruction::DoTx => Tx::from_instruction(self.data),
-            Instruction::DoTxHolder => {
-                let (index, hash) = do_tx_holder::args(self.data)?;
-                let info = self.state.info_tx_holder(index, false)?;
-                tx_from_holder(info, hash)
-            }
-            _ => unreachable!(),
-        }
+    fn tx(&self) -> &Tx {
+        &self.tx
     }
     fn save_iteration(&self, _: Iterations) -> Result<()> {
         unreachable!()

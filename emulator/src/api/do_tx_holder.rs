@@ -1,9 +1,9 @@
 use {
     super::{do_tx::atomic_transaction, Emulation},
-    crate::Instruction::DoTxHolder,
-    rome_evm::error::Result,
+    crate::state::State,
+    rome_evm::{api::do_tx_holder::args, error::Result, Holder},
     solana_client::rpc_client::RpcClient,
-    solana_program::{msg, pubkey::Pubkey},
+    solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey},
     std::sync::Arc,
 };
 
@@ -14,5 +14,13 @@ pub fn do_tx_holder<'a>(
     client: Arc<RpcClient>,
 ) -> Result<Emulation> {
     msg!("Instruction: Atomic transaction from holder");
-    atomic_transaction(program_id, data, signer, client, DoTxHolder)
+
+    let (holder, hash, chain) = args(data)?;
+    let state = State::new(program_id, Some(*signer), client.clone(), chain)?;
+
+    let mut bind = state.info_tx_holder(holder, false)?;
+    let info = bind.into_account_info();
+    let tx = Holder::tx(&info, hash, chain)?;
+
+    atomic_transaction(state, tx)
 }

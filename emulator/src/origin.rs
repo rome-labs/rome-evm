@@ -120,7 +120,7 @@ impl Origin for State<'_> {
     fn block_hash(&self, block: U256, slot: Slot) -> Result<H256> {
         let mut bind = self
             .load(&recent_blockhashes::ID, None)?
-            .ok_or(AccountNotFound(recent_blockhashes::ID))?;
+            .ok_or(SystemAccountNotFound(recent_blockhashes::ID))?;
         let info = bind.into_account_info();
         Info::block_hash(self, &info, block, slot)
     }
@@ -131,5 +131,9 @@ impl Origin for State<'_> {
 
     fn deallocated(&self) -> usize {
         *self.dealloc.borrow()
+    }
+
+    fn chain_id(&self) -> u64 {
+        self.chain
     }
 }

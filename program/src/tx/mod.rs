@@ -21,7 +21,7 @@ pub trait Base {
     fn to_rlp(&self) -> Vec<u8>;
     fn rs(&self) -> (U256, U256);
     fn recovery_id(&self) -> Result<u8>;
-    fn chain_id(&self) -> Option<u64>;
+    fn chain_id(&self) -> u64;
     fn from(&self) -> H160;
     fn set_from(&mut self, from: H160);
     #[cfg(test)]

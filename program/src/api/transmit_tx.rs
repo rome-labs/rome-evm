@@ -6,12 +6,12 @@ use {
     },
     evm::H256,
     solana_program::{account_info::AccountInfo, msg, pubkey::Pubkey},
-    std::{cell::RefMut, convert::TryInto, mem::size_of},
+    std::{convert::TryInto, mem::size_of},
 };
 
-// holder_idex | offset | hash | tx
-pub fn args(data: &[u8]) -> Result<(u64, usize, H256, &[u8])> {
-    if data.len() < size_of::<u64>() + size_of::<u64>() + size_of::<H256>() {
+// holder_idex | offset | hash | chain_id | tx
+pub fn args(data: &[u8]) -> Result<(u64, usize, H256, u64, &[u8])> {
+    if data.len() < size_of::<u64>() + size_of::<u64>() + size_of::<H256>() + size_of::<u64>() {
         return Err(InvalidInstructionData);
     }
     let (left, right) = data.split_at(size_of::<u64>());
@@ -20,10 +20,13 @@ pub fn args(data: &[u8]) -> Result<(u64, usize, H256, &[u8])> {
     let (left, right) = right.split_at(size_of::<u64>());
     let offset = u64::from_le_bytes(left.try_into().unwrap()) as usize;
 
-    let (left, right) = right.split_at(32);
+    let (left, right) = right.split_at(size_of::<H256>());
     let hash = H256::from_slice(left);
 
-    Ok((index, offset, hash, right))
+    let (left, right) = right.split_at(size_of::<u64>());
+    let chain = u64::from_le_bytes(left.try_into().unwrap());
+
+    Ok((index, offset, hash, chain, right))
 }
 
 pub fn transmit_tx<'a>(
@@ -33,24 +36,13 @@ pub fn transmit_tx<'a>(
 ) -> Result<()> {
     msg!("Instruction: Transmit tx");
 
-    let (index, offset, hash, tx) = args(data)?;
+    let (holder, offset, hash, chain, tx) = args(data)?;
+    let state = State::new(program_id, accounts, chain)?;
+    let info = state.info_tx_holder(holder, true)?;
+    let to = offset + tx.len();
 
-    let state = State::new(program_id, accounts);
-    let info = state.info_tx_holder(index, true)?;
-
-    let required_len = offset + tx.len();
-
-    if TxHolder::from_account(info)?.hash != hash
-        || required_len > Holder::from_account(info)?.len()
-    {
-        state.realloc(info, Holder::offset(info) + required_len)?;
+    if TxHolder::from_account(info)?.hash != hash || to > Holder::from_account(info)?.len() {
+        state.realloc(info, Holder::offset(info) + to)?;
     }
-
-    TxHolder::from_account_mut(info)?.hash = hash;
-    let holder = Holder::from_account_mut(info)?;
-
-    let mut location = RefMut::map(holder, |a| &mut a[offset..required_len]);
-    location.copy_from_slice(tx);
-
-    Ok(())
+    Holder::fill(info, hash, offset, to, tx)
 }

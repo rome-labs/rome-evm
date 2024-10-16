@@ -15,5 +15,7 @@ pub fn asserts() {
     assert_eq!(align_of::<StateHolder>(), 1);
     assert_eq!(align_of::<Lock>(), 1);
     assert_eq!(align_of::<RoLock>(), 1);
+    assert_eq!(align_of::<SignerInfo>(), 1);
+    assert_eq!(align_of::<OwnerInfo>(), 1);
     assert_eq!(size_of::<TxHolder>(), size_of::<StateHolder>());
 }

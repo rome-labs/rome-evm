@@ -52,23 +52,12 @@ impl Tx {
             }
         };
 
-        #[allow(unused_variables)]
-        if let Some(chain_id) = tx.chain_id() {
-            #[cfg(target_os = "solana")]
-            if chain_id != crate::CHAIN_ID {
-                return Err(IncorrectChainId(Some(chain_id)));
-            }
-        } else {
-            return Err(IncorrectChainId(None));
-        }
-
         let from = Tx::recovery_from(&*tx)?;
         tx.set_from(from);
 
         Ok(Self { tx })
     }
 
-    // fn recovery_from(tx: &Box<dyn Base>) -> Result<H160> {
     fn recovery_from(tx: &dyn Base) -> Result<H160> {
         let mut rs = [0_u8; 64];
 
@@ -116,8 +105,7 @@ impl Tx {
     pub fn gas_price(&self) -> U256 {
         self.tx.gas_price()
     }
-    #[cfg(test)]
-    pub fn chain_id(&self) -> Option<u64> {
+    pub fn chain_id(&self) -> u64 {
         self.tx.chain_id()
     }
     #[cfg(test)]
@@ -161,7 +149,7 @@ mod tests {
 
         assert_eq!(tx.from(), H160::from_slice(&from));
         assert_eq!(tx.to(), Some(H160::from_slice(&to)));
-        assert_eq!(tx.chain_id(), Some(1_u64.into()));
+        assert_eq!(tx.chain_id(), 1_u64);
         assert_eq!(tx.nonce(), 2310_u64);
         assert_eq!(tx.gas_limit(), 1_200_000_u64.into());
         assert_eq!(tx.gas_price(), 38_000_000_000_u64.into());
@@ -207,7 +195,7 @@ mod tests {
 
         assert_eq!(tx.from(), H160::from_slice(&from));
         assert_eq!(tx.to(), Some(H160::from_slice(&to)));
-        assert_eq!(tx.chain_id(), Some(1_u64.into()));
+        assert_eq!(tx.chain_id(), 1_u64);
         assert_eq!(tx.nonce(), 9215_u64);
         assert_eq!(tx.gas_limit(), 1_000_000_u64.into());
         assert_eq!(tx.gas_price(), 43_000_000_000_u64.into());

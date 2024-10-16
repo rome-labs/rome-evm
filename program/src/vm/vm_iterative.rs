@@ -174,7 +174,7 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
             GasTransfer => {
                 msg!("GasTransfer");
                 self.gas_transfer()?;
-                NextIteration(Box::new(Commit))
+                Serialize(Box::new(Commit))
             }
             Commit => {
                 msg!("Commit");

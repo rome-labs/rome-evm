@@ -20,4 +20,5 @@ entrypoint! {
     DoTxIterative => do_tx_iterative,
     DoTxHolderIterative => do_tx_holder_iterative,
     RegSigner => reg_signer,
+    RegOwner => reg_owner,
 }

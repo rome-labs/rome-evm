@@ -1,9 +1,9 @@
 use {
     super::gas_recipient,
-    crate::{state::State, Instruction},
+    crate::state::State,
     rome_evm::{
         accounts::{Data, Lock},
-        context::{account_lock::AccountLock, tx_from_holder, Context},
+        context::{account_lock::AccountLock, Context},
         error::{Result, RomeProgramError::*},
         state::{origin::Origin, Allocate},
         tx::tx::Tx,
@@ -15,27 +15,17 @@ use {
 
 pub struct ContextAtomic<'a, 'b> {
     pub state: &'b State<'a>,
-    pub data: &'a [u8],
-    pub instr: Instruction,
+    pub tx: Tx,
 }
 impl<'a, 'b> ContextAtomic<'a, 'b> {
-    pub fn new(state: &'b State<'a>, data: &'a [u8], instr: Instruction) -> Self {
-        Self { state, data, instr }
+    pub fn new(state: &'b State<'a>, tx: Tx) -> Self {
+        Self { state, tx }
     }
 }
 
 impl<'a, 'b> Context for ContextAtomic<'a, 'b> {
-    fn tx(&self) -> Result<Tx> {
-        match self.instr {
-            Instruction::DoTx => Tx::from_instruction(self.data),
-            Instruction::DoTxHolder => {
-                let (index, hash) = rome_evm::api::do_tx_holder::args(self.data)?;
-                let mut bind = self.state.info_tx_holder(index, false)?;
-                let info = bind.into_account_info();
-                tx_from_holder(&info, hash)
-            }
-            _ => unreachable!(),
-        }
+    fn tx(&self) -> &Tx {
+        &self.tx
     }
     fn save_iteration(&self, _: Iterations) -> Result<()> {
         unreachable!()

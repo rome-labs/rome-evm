@@ -1,9 +1,8 @@
 use {
-    super::{cast_slice, cast_slice_mut, AccountType, Data},
+    super::{cast_slice, cast_slice_mut, slise_len, AccountType, Data},
     crate::error::Result,
     solana_program::{account_info::AccountInfo, pubkey::Pubkey},
     std::cell::{Ref, RefMut},
-    std::mem::size_of,
 };
 
 #[derive(Clone, Default)]
@@ -64,11 +63,6 @@ impl Data for RoLock {
         AccountType::offset(info) + AccountType::size(info)
     }
     fn size(info: &AccountInfo) -> usize {
-        let offset = Self::offset(info);
-        let mut len = info.data.borrow().len();
-        assert!(len >= offset);
-        len -= offset;
-        assert!(len % size_of::<Self>() == 0);
-        len / size_of::<Self>()
+        slise_len::<Self>(info)
     }
 }

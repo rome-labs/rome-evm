@@ -3,7 +3,7 @@ version: "3"
 services:
   solana:
     container_name: solana
-    image: romeprotocol/test-validator:${REF_NAME:-latest}
+    image: romelabs/rome-evm:${REF_NAME:-latest}
     environment:
       RUST_LOG: solana_runtime::system_instruction_processor=debug,solana_runtime::message_processor=debug,solana_bpf_loader=debug,solana_rbpf=debug
     hostname: solana
@@ -29,9 +29,9 @@ services:
 
   tests:
     container_name: tests
-    image: romeprotocol/tests:${TESTS_REF_NAME:-latest}
+    image: romelabs/tests:${TESTS_REF_NAME:-latest}
     environment:
-      CROSS_ROLLUP_TESTS: false
+      TEST_NAME: evm
     hostname: tests
     networks:
       - net
@@ -41,7 +41,7 @@ services:
 
   proxy:
     container_name: proxy
-    image: romeprotocol/rome-apps:${ROME_APPS:-latest}
+    image: romelabs/rome-apps:${ROME_APPS:-latest}
     hostname: proxy
     environment:
       SERVICE_NAME: proxy
@@ -61,7 +61,7 @@ services:
 
   uniswap-v2-core:
     container_name: uniswap
-    image: romeprotocol/uniswap-v2-core:latest
+    image: romelabs/uniswap-v2-core:latest
     environment:
       NETWORK: proxy
       CHAIN_ID: 1001

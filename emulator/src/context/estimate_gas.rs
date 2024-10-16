@@ -20,19 +20,20 @@ use {
 };
 
 pub struct ContextEstimateGas<'a, 'b> {
-    pub legacy: Legacy,
     pub state: &'b State<'a>,
     pub holder: u64,
     pub tx_hash: H256,
+    pub tx: Tx,
 }
 impl<'a, 'b> ContextEstimateGas<'a, 'b> {
     pub fn new(state: &'b State<'a>, legacy: Legacy) -> Result<Self> {
         let holder = 0;
         let _state_holder = state.info_state_holder(holder, true)?;
+        let tx = Tx::from_legacy(legacy);
 
         Ok(Self {
             state,
-            legacy,
+            tx,
             tx_hash: H256::default(),
             holder,
         })
@@ -40,9 +41,8 @@ impl<'a, 'b> ContextEstimateGas<'a, 'b> {
 }
 
 impl<'a, 'b> Context for ContextEstimateGas<'a, 'b> {
-    fn tx(&self) -> Result<Tx> {
-        let tx = Tx::from_legacy(self.legacy.clone());
-        Ok(tx)
+    fn tx(&self) -> &Tx {
+        &self.tx
     }
     fn save_iteration(&self, iteration: Iterations) -> Result<()> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;

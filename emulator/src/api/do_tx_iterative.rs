@@ -1,16 +1,19 @@
 use {
     super::Emulation,
-    crate::{state::State, ContextIterative, Instruction::DoTxIterative},
+    crate::state::State,
     rome_evm::{
         context::{account_lock::AccountLock, Context},
         error::{Result, RomeProgramError::*},
         origin::Origin,
+        tx::tx::Tx,
         vm::{self, vm_iterative::MachineIterative, Execute},
+        H256,
     },
     solana_client::rpc_client::RpcClient,
-    solana_program::{msg, pubkey::Pubkey},
+    solana_program::{msg, pubkey::Pubkey, keccak},
     std::{mem::size_of, sync::Arc},
 };
+use crate::ContextIterative;
 
 // holder_index | tx
 pub fn args(data: &[u8]) -> Result<(u64, &[u8])> {
@@ -31,6 +34,7 @@ pub fn iterative_tx<L: AccountLock + Context>(state: &State, context: L) -> Resu
     let mut alloc_state = 0;
     let mut dealloc_state = 0;
 
+    // TODO remove and use unique tx_id in data
     loop {
         msg!("  iteration {}", iteration);
 
@@ -75,8 +79,12 @@ pub fn do_tx_iterative<'a>(
     client: Arc<RpcClient>,
 ) -> Result<Emulation> {
     msg!("Instruction: Iterative transaction");
-    let state = State::new(program_id, Some(*signer), Arc::clone(&client))?;
-    let context = ContextIterative::new(&state, data, DoTxIterative)?;
 
+    let (holder, tx) = args(data)?;
+    let hash = H256::from(keccak::hash(tx).to_bytes());
+    let tx = Tx::from_instruction(tx)?;
+
+    let state = State::new(program_id, Some(*signer), Arc::clone(&client), tx.chain_id())?;
+    let context = ContextIterative::new(&state, holder, &tx, hash)?;
     iterative_tx(&state, context)
 }

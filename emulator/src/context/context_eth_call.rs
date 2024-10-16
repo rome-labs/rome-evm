@@ -3,24 +3,23 @@ use rome_evm::{
     context::{account_lock::AccountLock, Context},
     error::Result,
     state::{origin::Origin, Allocate},
-    tx::{legacy::Legacy, tx::Tx},
+    tx::tx::Tx,
     vm::{vm_iterative::MachineIterative, Vm},
     H160, H256,
 };
 
 pub struct ContextEthCall {
-    pub legacy: Legacy,
+    pub tx: Tx,
 }
 impl ContextEthCall {
-    pub fn new(legacy: Legacy) -> Self {
-        Self { legacy }
+    pub fn new(tx: Tx) -> Self {
+        Self { tx }
     }
 }
 
 impl Context for ContextEthCall {
-    fn tx(&self) -> Result<Tx> {
-        let tx = Tx::from_legacy(self.legacy.clone());
-        Ok(tx)
+    fn tx(&self) -> &Tx {
+        &self.tx
     }
     fn save_iteration(&self, _: Iterations) -> Result<()> {
         unreachable!()

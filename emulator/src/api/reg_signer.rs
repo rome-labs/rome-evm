@@ -17,18 +17,17 @@ pub fn reg_signer<'a>(
     signer: &'a Pubkey,
     client: Arc<RpcClient>,
 ) -> Result<Emulation> {
-    let address = args(data)?;
-    msg!("Instruction: set signer info {}", address);
+    let (address, chain) = args(data)?;
+    msg!("Instruction: set signer info {} chain {}", address, chain);
 
-    let state = State::new(program_id, Some(*signer), client)?;
+    let state = State::new(program_id, Some(*signer), client, chain)?;
     let mut bind = state.info_signer_info(signer, true)?;
-
     {
         let info = bind.into_account_info();
         let mut signer_info = SignerInfo::from_account_mut(&info)?;
         signer_info.address = address;
     }
-
     state.update(bind)?;
+
     Emulation::without_vm(&state)
 }

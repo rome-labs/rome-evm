@@ -15,7 +15,7 @@ pub struct Legacy {
     pub v: U256,
     pub r: U256,
     pub s: U256,
-    pub chain_id: Option<U256>,
+    pub chain_id: U256,
     pub from: H160,
 }
 
@@ -57,8 +57,8 @@ impl Base for Legacy {
 
         Ok(id)
     }
-    fn chain_id(&self) -> Option<u64> {
-        self.chain_id.map(|a| a.as_u64())
+    fn chain_id(&self) -> u64 {
+        self.chain_id.as_u64()
     }
     fn from(&self) -> H160 {
         self.from
@@ -86,9 +86,9 @@ impl Legacy {
         let s = fix(rlp, 8)?;
 
         let chain_id = if v >= 35.into() {
-            Some((v - 1) / 2 - 17)
+            (v - 1) / 2 - 17
         } else if v == 27.into() || v == 28.into() {
-            None
+            return Err(IncorrectChainId(None));
         } else {
             return Err(Custom("incorrect tx.v".to_string()));
         };
@@ -125,13 +125,8 @@ impl rlp::Encodable for Legacy {
         stream.append(&self.value);
         stream.append(&self.data);
 
-        match self.chain_id.as_ref() {
-            None => stream.append(&""),
-            Some(chain_id) => {
-                stream.append(chain_id);
-                stream.append(&"");
-                stream.append(&"")
-            }
-        };
+        stream.append(&self.chain_id);
+        stream.append(&"");
+        stream.append(&"");
     }
 }

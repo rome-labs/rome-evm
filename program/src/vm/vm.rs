@@ -144,7 +144,7 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
     }
 
     pub fn snapshot_from_tx(&mut self) -> Result<Box<Snapshot>> {
-        let tx = self.context.tx()?;
+        let tx = self.context.tx();
         let from = tx.from();
         msg!("from {}", &hex::encode(from));
 
@@ -157,10 +157,10 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         }
 
         let snapshot = if tx.to().is_some() {
-            let call = self.call_from_tx(&tx)?;
+            let call = self.call_from_tx(tx)?;
             self.call_snapshot(call)?
         } else {
-            let create = self.create_from_tx(&tx)?;
+            let create = self.create_from_tx(tx)?;
             self.create_snapshot(create)?
         };
 

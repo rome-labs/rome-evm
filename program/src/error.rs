@@ -1,5 +1,5 @@
 use {
-    crate::accounts::LockType,
+    crate::{accounts::LockType, AccountType},
     evm::{H160, H256, U256},
     rlp::DecoderError,
     solana_program::{
@@ -86,26 +86,11 @@ pub enum RomeProgramError {
     #[error("An solana Pubkey error: {0}")]
     PubkeyError(#[from] PubkeyError),
 
-    #[error("account not found: {0}")]
-    AccountNotFound(Pubkey),
+    #[error("system account not found: {0}")]
+    SystemAccountNotFound(Pubkey),
 
-    #[error("Balance account not found: {0} address {1}")]
-    BalanceAccountNotFound(Pubkey, H160),
-
-    #[error("Storage account not found: {0} address {1} slot {2}")]
-    StorageAccountNotFound(Pubkey, H160, U256),
-
-    #[error("TxHolder account not found: {0} index {1}")]
-    TxHolderAccountNotFound(Pubkey, u64),
-
-    #[error("StateHolder account not found: {0} index {1}")]
-    StateHolderAccountNotFound(Pubkey, u64),
-
-    #[error("RoLock account not found: {0}")]
-    RoLockAccountNotFound(Pubkey),
-
-    #[error("SignerInfo account not found: {0}")]
-    SignerInfoAccountNotFound(Pubkey),
+    #[error("PDA account not found: {0} account type {1:?}")]
+    AccountNotFound(Pubkey, AccountType),
 
     #[error("attempt to init an initialized account: {0}")]
     AccountInitialized(Pubkey),
@@ -124,8 +109,8 @@ pub enum RomeProgramError {
     #[error("bincode error {0:?}")]
     BincodeError(bincode::Error),
 
-    #[error("Incorrect chain_id: {0:?}")]
-    IncorrectChainId(Option<u64>),
+    #[error("Incorrect chain_id: {0:?} ")]
+    IncorrectChainId(Option<(u64, u64)>),
 
     #[error("Vm fault: {0:?}")]
     VmFault(String),
@@ -153,6 +138,10 @@ pub enum RomeProgramError {
 
     #[error("parse Pubkey error: {0}")]
     ParsePubkeyError(#[from] ParsePubkeyError),
+
+    #[error("Unregistered chain_id: {0} ")]
+    UnregisteredChainId(u64),
+
 }
 
 impl From<ProgramError> for RomeProgramError {

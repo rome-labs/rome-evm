@@ -1,22 +1,3 @@
-use std::env;
-
-const fn parse_u64(s: &str) -> u64 {
-    let mut bytes = s.as_bytes();
-    let mut val: u64 = 0;
-    while let [byte, rest @ ..] = bytes {
-        assert!(b'0' <= *byte && *byte <= b'9', "invalid digit");
-        val = val * 10 + (*byte - b'0') as u64;
-        bytes = rest;
-    }
-
-    val
-}
-
-/// Values defined during compilation
-pub const CHAIN_ID: u64 = parse_u64(env!("CHAIN_ID"));
-pub const CONTRACT_OWNER: &str = env!("CONTRACT_OWNER");
-
-/// Unchangeable values
 pub const ACCOUNT_SEED: &[u8] = b"ACCOUN_SEED";
 pub const EVENT_LOG: &[u8] = b"EVENT_LOG";
 pub const EXIT_REASON: &[u8] = b"EXIT_REASON";
@@ -31,3 +12,9 @@ pub const SIG_VERIFY_COST: u64 = 5000;
 pub const SIGNER_INFO: &[u8] = b"SIGNER_INFO";
 pub const GAS_VALUE: &[u8] = b"GAS_VALUE";
 pub const GAS_RECIPIENT: &[u8] = b"GAS_RECIPIENT";
+pub const OWNER_INFO: &[u8] = b"OWNER_INFO";
+
+pub mod upgrade_authority {
+    // rome-owner-keypair.json
+    solana_program::declare_id!("8q76RPN5Tm6thVoQAUFhUP2diddGgtDLA6B6eShSazB2");
+}

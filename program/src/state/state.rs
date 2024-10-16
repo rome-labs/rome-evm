@@ -1,10 +1,6 @@
-use crate::{pda_signer_info, SignerInfo};
 use {
-    crate::{
-        accounts::Data, error::RomeProgramError::*, error::*, origin::Origin, pda_balance,
-        pda_ro_lock, pda_state_holder, pda_storage, pda_tx_holder, storage_index, AccountState,
-        AccountType, AddressTable, RoLock, Seed, StateHolder, TxHolder,
-    },
+    super::pda::{Pda, Seed},
+    crate::{error::RomeProgramError::*, error::*, origin::Origin, AccountType, OwnerInfo,},
     evm::{H160, U256},
     solana_program::{
         account_info::AccountInfo, msg, program::invoke_signed, pubkey::Pubkey, rent::Rent,
@@ -20,11 +16,20 @@ pub struct State<'a> {
     storage: RefCell<HashMap<(H160, U256), &'a AccountInfo<'a>>>,
     pub allocated: RefCell<usize>,
     pub deallocated: RefCell<usize>,
+    pub chain: u64,
+    pda: Pda<'a>,
 }
 
 #[allow(dead_code)]
 impl<'a> State<'a> {
-    pub fn new(program_id: &'a Pubkey, accounts: &'a [AccountInfo<'a>]) -> Self {
+    pub fn new(program_id: &'a Pubkey, accounts: &'a [AccountInfo<'a>], chain: u64) -> Result<Self> {
+        let state = Self::new_unchecked(program_id, accounts, chain);
+        let info = state.info_owner_reg(false)?;
+        OwnerInfo::check_chain(info, chain)?;
+
+        Ok(state)
+    }
+    pub fn new_unchecked(program_id: &'a Pubkey, accounts: &'a [AccountInfo<'a>], chain: u64) -> Self {
         let keys = accounts.iter().map(|a| *a.key);
         let all = HashMap::from_iter(keys.zip(accounts.iter()));
 
@@ -35,32 +40,21 @@ impl<'a> State<'a> {
             storage: RefCell::new(HashMap::new()),
             allocated: RefCell::new(0),
             deallocated: RefCell::new(0),
+            chain,
+            pda: Pda::new(program_id, chain),
         }
     }
-
     pub fn info_addr(&self, address: &H160, or_create: bool) -> Result<&'a AccountInfo<'a>> {
         let mut balance = self.balance.borrow_mut();
-        let info = if let Some(&info) = balance.get(address) {
-            info
+
+        if let Some(&info) = balance.get(address) {
+            Ok(info)
         } else {
-            let (key, seed) = pda_balance(address, self.program_id);
-            let info = self
-                .all
-                .get(&key)
-                .cloned()
-                .ok_or(BalanceAccountNotFound(key, *address))?;
-
-            if system_program::check_id(info.owner) && or_create {
-                let len = AccountState::offset(info) + AccountState::size(info);
-                self.create_pda(info, len, &seed, AccountType::Balance)?;
-            }
-
-            AccountType::is_ok(info, AccountType::Balance, self.program_id)?;
+            let (key, seed) = self.pda.balance_key(address);
+            let info = self.info_pda(key, seed, AccountType::Balance, or_create)?;
             balance.insert(*address, info);
-            info
-        };
-
-        Ok(info)
+            Ok(info)
+        }
     }
     pub fn info_slot(
         &self,
@@ -69,27 +63,17 @@ impl<'a> State<'a> {
         or_create: bool,
     ) -> Result<(&'a AccountInfo<'a>, usize)> {
         let mut storage = self.storage.borrow_mut();
-        let address_slot = (*address, *slot);
-        let (index_be, subindex) = storage_index(slot);
+        let addr_slot = (*address, *slot);
+        let (index_be, subindex) = Pda::storage_index(slot);
 
-        let info = if let Some(&info) = storage.get(&address_slot) {
+        let info = if let Some(&info) = storage.get(&addr_slot) {
             info
         } else {
             let base = self.info_addr(address, or_create)?.key;
-            let (key, seed) = pda_storage(base, index_be, self.program_id);
-            let info = self
-                .all
-                .get(&key)
-                .cloned()
-                .ok_or(StorageAccountNotFound(key, *address, *slot))?;
+            let (key, seed) = self.pda.storage_key(base, index_be);
+            let info = self.info_pda(key, seed, AccountType::Storage, or_create)?;
 
-            if system_program::check_id(info.owner) && or_create {
-                let len = AddressTable::offset(info) + AddressTable::size(info);
-                self.create_pda(info, len, &seed, AccountType::Storage)?;
-            }
-
-            AccountType::is_ok(info, AccountType::Storage, self.program_id)?;
-            storage.insert(address_slot, info);
+            storage.insert(addr_slot, info);
             info
         };
 
@@ -97,79 +81,55 @@ impl<'a> State<'a> {
     }
     pub fn info_tx_holder(&self, index: u64, or_create: bool) -> Result<&'a AccountInfo<'a>> {
         let signer = self.signer()?;
-        let (key, seed) = pda_tx_holder(signer.key, index, self.program_id);
-
-        let info = self
-            .all
-            .get(&key)
-            .cloned()
-            .ok_or(TxHolderAccountNotFound(key, index))?;
-
-        if system_program::check_id(info.owner) && or_create {
-            msg!("info_tx_holde: info.data_len() = {}", info.data_len());
-            let len = TxHolder::offset(info) + TxHolder::size(info);
-            self.create_pda(info, len, &seed, AccountType::TxHolder)?;
-        }
-        AccountType::is_ok(info, AccountType::TxHolder, self.program_id)?;
-
-        Ok(info)
+        let (key, seed) = self.pda.tx_holder_key(signer.key, index);
+        self.info_pda(key, seed, AccountType::TxHolder, or_create)
     }
     pub fn info_state_holder(&self, index: u64, or_create: bool) -> Result<&'a AccountInfo<'a>> {
         let signer = self.signer()?;
-        let (key, seed) = pda_state_holder(signer.key, index, self.program_id);
-
-        let info = self
-            .all
-            .get(&key)
-            .cloned()
-            .ok_or(StateHolderAccountNotFound(key, index))?;
-
-        if system_program::check_id(info.owner) && or_create {
-            let len = StateHolder::offset(info) + StateHolder::size(info);
-            self.create_pda(info, len, &seed, AccountType::StateHolder)?;
-        }
-        AccountType::is_ok(info, AccountType::StateHolder, self.program_id)?;
-
-        Ok(info)
+        let (key, seed) = self.pda.state_holder_key(signer.key, index);
+        self.info_pda(key, seed, AccountType::StateHolder, or_create)
     }
     pub fn info_ro_lock(&self, key: &Pubkey, or_create: bool) -> Result<&'a AccountInfo<'a>> {
-        let (key, seed) = pda_ro_lock(key, self.program_id);
-
-        let info = self
-            .all
-            .get(&key)
-            .cloned()
-            .ok_or(RoLockAccountNotFound(key))?;
-
-        if system_program::check_id(info.owner) && or_create {
-            let len = RoLock::offset(info);
-            self.create_pda(info, len, &seed, AccountType::RoLock)?;
-        }
-
-        AccountType::is_ok(info, AccountType::RoLock, self.program_id)?;
-        Ok(info)
+        let (key, seed) = self.pda.ro_lock_key(key);
+        self.info_pda(key, seed, AccountType::RoLock, or_create)
     }
-    pub fn info_signer_info(&self, key: &Pubkey, or_create: bool) -> Result<&'a AccountInfo<'a>> {
-        let (key, seed) = pda_signer_info(key, self.program_id);
+    pub fn info_signer_reg(&self, key: &Pubkey, or_create: bool) -> Result<&'a AccountInfo<'a>> {
+        let (key, seed) = self.pda.signer_info_key(key);
+        self.info_pda(key, seed, AccountType::SignerInfo, or_create)
+    }
+    pub fn info_owner_reg(&self, or_create: bool) -> Result<&'a AccountInfo<'a>> {
+        let (key, seed) = self.pda.owner_info_key();
+        self.info_pda(key, seed, AccountType::OwnerInfo, or_create)
+    }
 
+    pub fn info_pda(
+        &self,
+        key: Pubkey,
+        seed: Seed,
+        typ: AccountType,
+        or_create: bool,
+    ) -> Result<&'a AccountInfo<'a>> {
         let info = self
             .all
             .get(&key)
             .cloned()
-            .ok_or(SignerInfoAccountNotFound(key))?;
+            .ok_or(AccountNotFound(key, typ.clone()))?;
 
         if system_program::check_id(info.owner) && or_create {
-            let len = SignerInfo::offset(info) + SignerInfo::size(info);
-            self.create_pda(info, len, &seed, AccountType::SignerInfo)?;
+            self.create_pda(info, &seed, &typ)?;
         }
 
-        AccountType::is_ok(info, AccountType::SignerInfo, self.program_id)?;
+        AccountType::is_ok(info, typ, self.program_id)?;
         Ok(info)
     }
     pub fn info_sys(&self, key: &Pubkey) -> Result<&'a AccountInfo<'a>> {
         for id in [&recent_blockhashes::ID, &system_program::ID] {
             if key == id {
-                return self.all.get(key).cloned().ok_or(AccountNotFound(*key));
+                return self
+                    .all
+                    .get(key)
+                    .cloned()
+                    .ok_or(SystemAccountNotFound(*key));
             }
         }
         panic!("Try to use non-pda account: {}", key)
@@ -223,23 +183,11 @@ impl<'a> State<'a> {
 
         Ok(())
     }
-    pub fn pda_init(pda: &'a AccountInfo<'a>, typ: AccountType) -> Result<()> {
-        match typ {
-            AccountType::New => unreachable!(),
-            AccountType::Balance => AccountState::init(pda),
-            AccountType::Storage => AddressTable::init(pda),
-            AccountType::TxHolder => TxHolder::init(pda),
-            AccountType::StateHolder => StateHolder::init(pda),
-            AccountType::RoLock => AccountType::init(pda, AccountType::RoLock),
-            AccountType::SignerInfo => SignerInfo::init(pda),
-        }
-    }
     pub fn create_pda(
         &self,
         pda: &'a AccountInfo<'a>,
-        len: usize,
         seed: &Seed,
-        typ: AccountType,
+        typ: &AccountType,
     ) -> Result<()> {
         assert_eq!(pda.lamports(), 0);
         assert_eq!(pda.data_len(), 0);
@@ -248,6 +196,7 @@ impl<'a> State<'a> {
         assert_eq!(*pda.owner, system_program::ID);
 
         let system = self.info_sys(&system_program::ID)?;
+        let len = Pda::empty_size(pda, typ);
         let rent = Rent::get()?.minimum_balance(len);
         let payer = self.signer()?;
         invoke_signed(
@@ -265,7 +214,7 @@ impl<'a> State<'a> {
         self.inc_allocated(len)?;
         msg!("pda is created {}", pda.key);
 
-        State::pda_init(pda, typ)
+        Pda::init(pda, typ)
     }
     pub fn all(&self) -> &HashMap<Pubkey, &'a AccountInfo<'a>> {
         &self.all

@@ -16,6 +16,7 @@ use {
 
 pub trait Origin {
     fn program_id(&self) -> &Pubkey;
+    fn chain_id(&self) -> u64;
     fn nonce(&self, address: &H160) -> Result<u64>;
     fn balance(&self, address: &H160) -> Result<U256>;
     fn code(&self, address: &H160) -> Result<Vec<u8>>;
@@ -80,6 +81,9 @@ pub trait Origin {
 impl Origin for State<'_> {
     fn program_id(&self) -> &Pubkey {
         self.program_id
+    }
+    fn chain_id(&self) -> u64 {
+        self.chain
     }
     fn nonce(&self, address: &H160) -> Result<u64> {
         let info = self.info_addr(address, false)?;

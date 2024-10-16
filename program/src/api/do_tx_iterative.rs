@@ -3,10 +3,11 @@ use {
         context::ContextIterative,
         error::{Result, RomeProgramError::InvalidInstructionData},
         state::State,
+        tx::tx::Tx,
         vm::{vm_iterative::MachineIterative::FromStateHolder, Execute, Vm},
-        Instruction::DoTxIterative,
+        H256,
     },
-    solana_program::{account_info::AccountInfo, msg, pubkey::Pubkey},
+    solana_program::{account_info::AccountInfo, keccak, msg, pubkey::Pubkey},
     std::{convert::TryInto, mem::size_of},
 };
 
@@ -36,8 +37,13 @@ pub fn do_tx_iterative<'a>(
     data: &'a [u8],
 ) -> Result<()> {
     msg!("Instruction: Iterative transaction");
-    let state = State::new(program_id, accounts);
-    let context = ContextIterative::new(&state, accounts, data, DoTxIterative)?;
+
+    let (holder, lock_overrides, tx) = args(data)?;
+    let hash = H256::from(keccak::hash(tx).to_bytes());
+    let tx = Tx::from_instruction(tx)?;
+
+    let state = State::new(program_id, accounts, tx.chain_id())?;
+    let context = ContextIterative::new(&state, accounts, holder, lock_overrides, tx, hash)?;
     let mut vm = Vm::new_iterative(&state, &context)?;
     vm.consume(FromStateHolder)
 }
