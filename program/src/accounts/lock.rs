@@ -1,7 +1,7 @@
 use {
     super::{
         AccountType::{self, *},
-        {cast, cast_mut, Data},
+        Ver, {cast, cast_mut, Data},
     },
     crate::{
         config::LOCK_DURATION,
@@ -42,7 +42,9 @@ pub struct Lock {
 }
 
 impl Lock {
-    pub fn init(info: &AccountInfo) -> Result<()> {
+    pub fn init(info: &AccountInfo, typ: AccountType) -> Result<()> {
+        Ver::init(info, typ)?;
+
         let mut lock = Lock::from_account_mut(info)?;
         *lock = Lock {
             lock: None,
@@ -110,10 +112,9 @@ impl Data for Lock {
         cast_mut(info, Self::offset(info), Self::size(info))
     }
     fn size(_info: &AccountInfo) -> usize {
-        assert_eq!(size_of::<Self>(), 41);
         size_of::<Self>()
     }
     fn offset(info: &AccountInfo) -> usize {
-        AccountType::offset(info) + AccountType::size(info)
+        Ver::offset(info) + Ver::size(info)
     }
 }

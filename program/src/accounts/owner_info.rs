@@ -1,23 +1,33 @@
 use {
-    super::{AccountType, Data},
+    super::{AccountType, Data, Ver},
     crate::{
         accounts::{cast_slice, cast_slice_mut, slise_len},
-        error::{Result, RomeProgramError::UnregisteredChainId,},
+        error::{Result, RomeProgramError::UnregisteredChainId},
         H160,
     },
     solana_program::{account_info::AccountInfo, pubkey::Pubkey},
     std::cell::{Ref, RefMut},
 };
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 #[repr(C, packed)]
 pub struct OwnerInfo {
     pub key: Pubkey,
     pub chain: u64,
     pub mint_address: Option<H160>,
+    pub slot: u64,
 }
 
 impl OwnerInfo {
+    pub fn init(info: &AccountInfo) -> Result<()> {
+        Ver::init(info, AccountType::OwnerInfo)?;
+
+        let owner = OwnerInfo::from_account_mut(info)?;
+        assert!(owner.is_empty());
+
+        Ok(())
+    }
+
     pub fn get_mut<'a>(
         info: &'a AccountInfo,
         key: &Pubkey,
@@ -65,8 +75,8 @@ impl Data for OwnerInfo {
         cast_slice_mut(info, Self::offset(info), Self::size(info))
     }
     fn offset(info: &AccountInfo) -> usize {
-        // account_type | reg_owner
-        AccountType::offset(info) + AccountType::size(info)
+        // account_type | ver | reg_owner
+        Ver::offset(info) + Ver::size(info)
     }
     fn size(info: &AccountInfo) -> usize {
         slise_len::<Self>(info)

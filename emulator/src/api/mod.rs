@@ -1,3 +1,4 @@
+mod confirm_tx_iterative;
 mod create_balance;
 mod do_tx;
 pub mod do_tx_holder;
@@ -9,10 +10,11 @@ mod eth_get_balance;
 mod eth_get_code;
 mod eth_get_storage_at;
 mod eth_get_tx_count;
+mod get_rollups;
 mod reg_owner;
-mod reg_signer;
 mod transmit_tx;
 
+pub use confirm_tx_iterative::confirm_tx_iterative;
 pub use create_balance::create_balance;
 pub use do_tx::do_tx;
 pub use do_tx_holder::do_tx_holder;
@@ -24,8 +26,8 @@ pub use eth_get_balance::eth_get_balance;
 pub use eth_get_code::eth_get_code;
 pub use eth_get_storage_at::eth_get_storage_at;
 pub use eth_get_tx_count::eth_get_tx_count;
+pub use get_rollups::get_rollups;
 pub use reg_owner::reg_owner;
-pub use reg_signer::reg_signer;
 pub use transmit_tx::transmit_tx;
 
 use {
@@ -58,6 +60,8 @@ pub struct Emulation {
     pub allocated_state: usize,
     pub deallocated_state: usize,
     pub gas: u64,
+    pub lock_overrides: Vec<u8>,
+    pub syscalls: u64,
 }
 
 impl Emulation {
@@ -72,8 +76,12 @@ impl Emulation {
         dealloc: usize,
         alloc_state: usize,
         dealloc_state: usize,
+        lock_overrides: Vec<Pubkey>,
+        syscalls: u64,
     ) -> Result<Self> {
         let gas = Emulation::gas(alloc_state, dealloc_state, iter_count)?;
+
+        let lock_overrides = Emulation::cast_overrides(state, lock_overrides)?;
 
         msg!(">> emulation results:");
         msg!("steps_executed: {}", steps_executed);
@@ -84,6 +92,8 @@ impl Emulation {
         msg!("deallocated_state: {}", dealloc_state);
         msg!("exit_reason: {:?}", exit_reason);
         msg!("gas: {:?}", gas);
+        msg!("lock_overrides: {:?}", lock_overrides);
+        msg!("syscalls: {}", syscalls);
 
         Emulation::log_accounts(state)?;
 
@@ -103,6 +113,8 @@ impl Emulation {
             allocated_state: alloc_state,
             deallocated_state: dealloc_state,
             gas,
+            lock_overrides,
+            syscalls,
         })
     }
 
@@ -172,6 +184,8 @@ impl Emulation {
             allocated_state: alloc_state,
             deallocated_state: dealloc_state,
             gas,
+            lock_overrides: vec![],
+            syscalls: state.pda.syscall.count(),
         })
     }
 
@@ -180,6 +194,23 @@ impl Emulation {
         let rent = Rent::get()?.minimum_balance(space_to_pay);
 
         Ok(rent + SIG_VERIFY_COST * iter_count)
+    }
+
+    pub fn cast_overrides(state: &State, overrides: Vec<Pubkey>) -> Result<Vec<u8>> {
+        state
+            .accounts
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter(|(_, (key, _))| overrides.iter().any(|locked| locked == *key))
+            .map(|(ix, _)| {
+                if ix > u8::MAX as usize {
+                    Err(Custom("too  many accounts".to_string()))
+                } else {
+                    Ok(ix as u8)
+                }
+            })
+            .collect::<Result<Vec<_>>>()
     }
 }
 

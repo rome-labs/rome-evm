@@ -1,7 +1,10 @@
 use {
     super::{cast, cast_mut, Data, Lock},
-    crate::{error::Result, AccountType},
-    evm::U256,
+    crate::{
+        error::{Result, RomeProgramError::DeployContractToExistingAccount},
+        AccountType,
+    },
+    evm::{H160, U256},
     solana_program::{account_info::AccountInfo, pubkey::Pubkey},
     std::{
         cell::{Ref, RefMut},
@@ -18,8 +21,7 @@ pub struct AccountState {
 
 impl AccountState {
     pub fn init(info: &AccountInfo) -> Result<()> {
-        AccountType::init(info, AccountType::Balance)?;
-        Lock::init(info)?;
+        Lock::init(info, AccountType::Balance)?;
 
         let len = AccountState::offset(info) + AccountState::size(info);
         assert_eq!(len, info.data_len());
@@ -39,9 +41,13 @@ impl AccountState {
         AccountType::from_account(info)?;
         Ok(())
     }
-    pub fn is_contract<'a>(info: &'a AccountInfo<'a>) -> Result<bool> {
+    pub fn check_no_contract<'a>(info: &'a AccountInfo<'a>, address: &H160) -> Result<()> {
         let state = AccountState::from_account(info)?;
-        Ok(state.is_contract)
+        if state.is_contract {
+            return Err(DeployContractToExistingAccount(*address));
+        }
+
+        Ok(())
     }
 }
 

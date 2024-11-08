@@ -1,9 +1,12 @@
-use solana_program::msg;
 use {
-    crate::{allocate::Allocate, error::Result, origin::Origin},
+    crate::{
+        allocate::Allocate, context::account_lock::AccountLock, error::Result, origin::Origin,
+        NUMBER_ALLOC_DIFF_PER_TX,
+    },
     borsh::{BorshDeserialize, BorshSerialize},
     evm::{H160, H256, U256},
-    std::collections::BTreeMap,
+    solana_program::msg,
+    std::collections::{BTreeMap, HashSet},
 };
 
 /// Journal entries that are used to track changes to the state and are used to revert it.
@@ -212,7 +215,6 @@ impl Journal {
 
         for _ in 0..depth {
             let diff: BTreeMap<H160, Vec<Diff>> = BorshDeserialize::deserialize(from)?;
-
             journal = Some(Box::new(Self {
                 diff,
                 parent: journal,
@@ -221,9 +223,9 @@ impl Journal {
 
         Ok(*journal.expect("journal expected"))
     }
-    pub fn commit<T: Origin>(&self, state: &T) -> Result<()> {
+    pub fn commit<T: Origin, L: AccountLock>(&self, state: &T, context: &L) -> Result<()> {
         if let Some(parent) = self.parent.as_ref() {
-            parent.commit(state)?
+            parent.commit(state, context)?
         }
 
         // todo: replace BtreeMap by Vec
@@ -233,16 +235,14 @@ impl Journal {
                 match diff {
                     Diff::NonceChange => {
                         msg!("NonceChange");
-                        state.inc_nonce(address)?;
+                        state.inc_nonce(address, context)?;
                     }
                     Diff::CodeChange { code, valids } => {
-                        msg!("CodeChange");
-                        state.set_code(address, code, valids)?;
+                        state.set_code(address, code, valids, context)?;
                         msg!("contract is deployed");
                     }
                     Diff::StorageChange { key, value } => {
-                        msg!("StorageChange");
-                        state.set_storage(address, key, value)?;
+                        state.set_storage(address, key, value, context)?;
                     }
                     Diff::Suicide => {
                         todo!()
@@ -253,11 +253,11 @@ impl Journal {
                     }
                     Diff::TransferFrom { balance } => {
                         msg!("TransferFrom");
-                        state.sub_balance(address, balance)?;
+                        state.sub_balance(address, balance, context)?;
                     }
                     Diff::TransferTo { balance } => {
                         msg!("TransferTo");
-                        state.add_balance(address, balance)?;
+                        state.add_balance(address, balance, context)?;
                     }
                 }
             }
@@ -266,35 +266,95 @@ impl Journal {
         Ok(())
     }
 
-    pub fn allocate<T: Allocate>(&self, state: &T) -> Result<bool> {
-        if let Some(parent) = self.parent.as_ref() {
-            if !parent.allocate(state)? {
-                return Ok(false);
-            }
+    pub fn alloc_balances<T: Allocate + Origin, L: AccountLock>(
+        &self,
+        state: &T,
+        context: &L,
+    ) -> Result<bool> {
+        if !self
+            .parent
+            .as_ref()
+            .map_or(Ok(true), |parent| parent.alloc_balances(state, context))?
+        {
+            return Ok(false);
         }
 
         for (address, diffs) in &self.diff {
             for diff in diffs {
+                // alloc_limit should be enough to allocate the AccountState
+                if state.syscalls() >= NUMBER_ALLOC_DIFF_PER_TX || state.alloc_limit() < 500 {
+                    return Ok(false);
+                }
+
                 match diff {
                     // TODO check allocation limit
                     Diff::NonceChange
                     | Diff::TransferFrom { balance: _ }
                     | Diff::TransferTo { balance: _ } => {
-                        state.allocate_balance(address)?;
-                    }
-                    Diff::StorageChange { key, value: _ } => {
-                        state.allocate_storage(address, key)?;
+                        state.alloc_balance(address, context)?;
                     }
                     Diff::CodeChange { code, valids } => {
-                        if !state.allocate_contract(address, code, valids)? {
+                        if !state.alloc_contract(address, code, valids, context)? {
                             return Ok(false);
                         }
                     }
+                    Diff::StorageChange { key, value: _ } => {
+                        // just to calculate and cache the hash
+                        let (_, _, _) = state.slot_to_key(address, key);
+                    }
                     _ => {}
-                }
+                };
             }
         }
 
         Ok(true)
+    }
+    pub fn diff_len(&self) -> usize {
+        let parent = self.parent.as_ref().map_or(0, |parent| parent.diff_len());
+
+        parent + self.diff.values().fold(0, |s, a| s + a.len())
+    }
+
+    pub fn merge_slots<T: Origin>(&self, state: &T) -> Result<BTreeMap<H160, HashSet<U256>>> {
+        let parent = self
+            .parent
+            .as_ref()
+            .map_or(Ok(BTreeMap::new()), |parent| parent.merge_slots(state))?;
+
+        let mut new = self
+            .diff
+            .iter()
+            .map(|(address, diffs)| {
+                let slots = diffs
+                    .iter()
+                    .filter_map(|diff| match diff {
+                        Diff::StorageChange {
+                            key: slot,
+                            value: _,
+                        } => {
+                            if let Ok(Some(_)) = state.storage(address, slot) {
+                                None
+                            } else {
+                                Some(*slot)
+                            }
+                        }
+                        _ => None,
+                    })
+                    .collect::<HashSet<U256>>();
+
+                (*address, slots)
+            })
+            .collect::<BTreeMap<H160, HashSet<U256>>>();
+
+        // merge from parent
+        parent.into_iter().for_each(|(address, set)| {
+            if let Some(new_set) = new.get_mut(&address) {
+                new_set.extend(set);
+            } else {
+                new.insert(address, set);
+            }
+        });
+
+        Ok(new)
     }
 }

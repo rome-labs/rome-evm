@@ -4,7 +4,7 @@ use {
         accounts::{Data, Lock, LockType, RoLock},
         error::{Result, RomeProgramError::*},
     },
-    solana_program::{msg, pubkey::Pubkey},
+    solana_program::{account_info::AccountInfo, msg, pubkey::Pubkey},
     std::mem::size_of,
 };
 
@@ -12,7 +12,8 @@ pub trait AccountLock {
     fn lock(&self) -> Result<()>;
     fn locked(&self) -> Result<bool>;
     fn unlock(&self) -> Result<()>;
-    fn lock_new_one(&self) -> Result<()>;
+    fn lock_new_one(&self, info: &AccountInfo) -> Result<()>;
+    fn check_writable(&self, info: &AccountInfo) -> Result<()>;
 }
 
 impl AccountLock for ContextAtomic<'_, '_> {
@@ -35,8 +36,11 @@ impl AccountLock for ContextAtomic<'_, '_> {
     fn unlock(&self) -> Result<()> {
         unreachable!()
     }
-    fn lock_new_one(&self) -> Result<()> {
+    fn lock_new_one(&self, _info: &AccountInfo) -> Result<()> {
         unreachable!()
+    }
+    fn check_writable(&self, _info: &AccountInfo) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -44,6 +48,7 @@ impl AccountLock for ContextIterative<'_, '_> {
     fn lock(&self) -> Result<()> {
         assert!(self.origin_accounts.len() <= 256); // ALT supports up to 256 accounts
 
+        // TODO: there may be allocation and deallocation together (ro_lock)
         for (index, info) in self.origin_accounts.iter().enumerate() {
             if Lock::is_managed(info, self.state.program_id)? {
                 let mut lock = Lock::from_account_mut(info)?;
@@ -52,7 +57,7 @@ impl AccountLock for ContextIterative<'_, '_> {
                     let ro_lock_info = self.state.info_ro_lock(info.key, true)?;
                     let push = match lock.get()? {
                         Some(LockType::Ro) => {
-                            // allocate ro-lock-info
+                            // allocate/resize ro-lock-info
                             if !RoLock::found(ro_lock_info, self.state_holder.key)? {
                                 let len = ro_lock_info.data_len() + size_of::<RoLock>();
                                 self.state.realloc(ro_lock_info, len)?;
@@ -74,9 +79,7 @@ impl AccountLock for ContextIterative<'_, '_> {
                     lock.ro_lock()?;
                     // push holder.key to ro-lock-info
                     if push {
-                        let mut ro_lock = RoLock::from_account_mut(ro_lock_info)?;
-                        assert!(!ro_lock.is_empty());
-                        ro_lock.last_mut().unwrap().0 = self.state_holder.key.to_bytes();
+                        RoLock::add_preallocated(ro_lock_info, self.state_holder.key)?;
                     }
                 } else {
                     // writable lock is required
@@ -163,14 +166,22 @@ impl AccountLock for ContextIterative<'_, '_> {
 
         Ok(())
     }
-    fn lock_new_one(&self) -> Result<()> {
-        for info in self.origin_accounts.iter() {
-            if Lock::is_managed(info, self.state.program_id)? {
-                let mut lock = Lock::from_account_mut(info)?;
-                if lock.is_new_one() {
-                    lock.rw_lock(self.state_holder.key)?;
-                }
+    fn lock_new_one(&self, info: &AccountInfo) -> Result<()> {
+        if Lock::is_managed(info, self.state.program_id)? {
+            let mut lock = Lock::from_account_mut(info)?;
+            if lock.is_new_one() {
+                lock.rw_lock(self.state_holder.key)?;
             }
+        }
+
+        Ok(())
+    }
+    /// this is not lock checking (lock can be expired).
+    /// It is just checking the type of lock, that was checked earlier.
+    fn check_writable(&self, info: &AccountInfo) -> Result<()> {
+        let lock = Lock::from_account(info)?;
+        if let Some(LockType::Ro) = lock.lock {
+            return Err(AttemptWriteRoAccount(*info.key));
         }
 
         Ok(())

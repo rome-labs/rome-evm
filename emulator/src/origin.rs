@@ -1,18 +1,17 @@
+use rome_evm::pda::{Pda, Seed};
 use {
     crate::state::State,
     rome_evm::{
+        context::account_lock::AccountLock,
         error::{Result, RomeProgramError::*},
         info::Info,
         origin::Origin,
-        AddressTable, Code, Data, Storage, H160, H256, U256,
+        Code, Data, H160, H256, U256,
     },
     solana_program::{
         account_info::IntoAccountInfo, clock::Slot, pubkey::Pubkey, sysvar::recent_blockhashes,
     },
-    std::{
-        cmp::Ordering::{Greater, Less},
-        mem::size_of,
-    },
+    std::cmp::Ordering::{Greater, Less},
 };
 
 impl Info for State<'_> {}
@@ -42,29 +41,45 @@ impl Origin for State<'_> {
         Info::valids(self, &info)
     }
     fn storage(&self, address: &H160, slot: &U256) -> Result<Option<U256>> {
-        let (mut bind, sub_index) = self.info_slot(address, slot, false)?;
+        let (mut bind, sub_ix) = self.info_slot(address, slot, false)?;
         let info = bind.into_account_info();
-        Info::storage(self, &info, sub_index)
+        Info::storage(self, &info, sub_ix)
     }
-    fn inc_nonce(&self, address: &H160) -> Result<()> {
+    fn inc_nonce<L: AccountLock>(&self, address: &H160, context: &L) -> Result<()> {
         let mut bind = self.info_addr(address, true)?;
         let info = bind.into_account_info();
-        Info::inc_nonce(self, &info)?;
+        Info::inc_nonce(self, &info, context)?;
         self.update(bind)
     }
-    fn add_balance(&self, address: &H160, balance: &U256) -> Result<()> {
+    fn add_balance<L: AccountLock>(
+        &self,
+        address: &H160,
+        balance: &U256,
+        context: &L,
+    ) -> Result<()> {
         let mut bind = self.info_addr(address, true)?;
         let info = bind.into_account_info();
-        Info::add_balance(self, &info, balance)?;
+        Info::add_balance(self, &info, balance, context)?;
         self.update(bind)
     }
-    fn sub_balance(&self, address: &H160, balance: &U256) -> Result<()> {
+    fn sub_balance<L: AccountLock>(
+        &self,
+        address: &H160,
+        balance: &U256,
+        context: &L,
+    ) -> Result<()> {
         let mut bind = self.info_addr(address, true)?;
         let info = bind.into_account_info();
-        Info::sub_balance(self, &info, balance, address)?;
+        Info::sub_balance(self, &info, balance, address, context)?;
         self.update(bind)
     }
-    fn set_code(&self, address: &H160, code: &[u8], valids: &[u8]) -> Result<()> {
+    fn set_code<L: AccountLock>(
+        &self,
+        address: &H160,
+        code: &[u8],
+        valids: &[u8],
+        context: &L,
+    ) -> Result<()> {
         let mut bind = self.info_addr(address, true)?;
 
         let len = bind.1.data.len();
@@ -91,30 +106,19 @@ impl Origin for State<'_> {
         }
 
         let info = bind.into_account_info();
-        Info::set_code(self, &info, code, valids, address)?;
+        Info::set_code(self, &info, code, valids, address, context)?;
         self.update(bind)
     }
-    fn set_storage(&self, address: &H160, slot: &U256, value: &U256) -> Result<()> {
-        let (mut bind, sub_index) = self.info_slot(address, slot, true)?;
-
-        let allocate = {
-            let info = bind.into_account_info();
-            let table = AddressTable::from_account(&info)?;
-            let index = table.get(sub_index) as usize;
-            index == 0
-        };
-
-        if allocate {
-            let new_len = bind.1.data.len() + size_of::<Storage>();
-            self.realloc(&mut bind, new_len)?;
-            let info = bind.into_account_info();
-            let len = Storage::from_account(&info)?.len();
-            let mut table = AddressTable::from_account_mut(&info)?;
-            table.set(sub_index, len);
-        }
-
+    fn set_storage<L: AccountLock>(
+        &self,
+        address: &H160,
+        slot: &U256,
+        value: &U256,
+        context: &L,
+    ) -> Result<()> {
+        let (mut bind, sub_ix) = self.info_slot(address, slot, true)?;
         let info = bind.into_account_info();
-        Info::set_storage(self, &info, sub_index, value)?;
+        Info::set_storage(self, &info, sub_ix, value, context)?;
         self.update(bind)
     }
     fn block_hash(&self, block: U256, slot: Slot) -> Result<H256> {
@@ -135,5 +139,24 @@ impl Origin for State<'_> {
 
     fn chain_id(&self) -> u64 {
         self.chain
+    }
+
+    fn serialize_pda(&self, into: &mut &mut [u8]) -> Result<()> {
+        self.pda.serialize(into)
+    }
+
+    fn deserialize_pda(&self, from: &mut &[u8]) -> Result<()> {
+        self.pda.deserialize(from)
+    }
+
+    fn slot_to_key(&self, address: &H160, slot: &U256) -> (Pubkey, Seed, u8) {
+        let (index_be, sub_ix) = Pda::storage_index(slot);
+        let (base, _) = self.pda.balance_key(address);
+        let (key, seed) = self.pda.storage_key(&base, index_be);
+
+        (key, seed, sub_ix)
+    }
+    fn syscalls(&self) -> u64 {
+        self.syscall.count()
     }
 }

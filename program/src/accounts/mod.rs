@@ -1,30 +1,30 @@
 mod account_state;
 mod account_type;
-mod address_table;
 mod code;
 mod holder;
 mod lock;
 mod owner_info;
 mod ro_lock;
-mod signer_info;
+mod slot;
 mod state_holder;
 mod storage;
 mod tx_holder;
 mod valids;
+mod ver;
 
 pub use account_state::*;
 pub use account_type::*;
-pub use address_table::*;
 pub use code::Code;
 pub use holder::Holder;
 pub use lock::{Lock, LockType};
 pub use owner_info::OwnerInfo;
 pub use ro_lock::RoLock;
-pub use signer_info::SignerInfo;
+pub use slot::Slot;
 pub use state_holder::{Iterations, StateHolder};
 pub use storage::Storage;
 pub use tx_holder::TxHolder;
 pub use valids::Valids;
+pub use ver::Ver;
 
 use {
     crate::error::{Result, RomeProgramError::InvalidDataLength},

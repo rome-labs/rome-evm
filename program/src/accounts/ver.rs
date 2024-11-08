@@ -1,32 +1,28 @@
 use {
-    super::{AccountType, Data},
-    crate::{
-        accounts::{cast, cast_mut},
-        error::Result,
-    },
-    evm::H160,
+    super::{cast, cast_mut, Data},
+    crate::{error::Result, AccountType},
     solana_program::account_info::AccountInfo,
-    std::cell::{Ref, RefMut},
-    std::mem::size_of,
+    std::{
+        cell::{Ref, RefMut},
+        mem::size_of,
+    },
 };
 
-#[derive(Clone, Default)]
 #[repr(C, packed)]
-pub struct SignerInfo {
-    pub address: H160,
-}
+pub struct Ver(u8);
 
-impl SignerInfo {
-    pub fn init(info: &AccountInfo) -> Result<()> {
-        AccountType::init(info, AccountType::SignerInfo)?;
+impl Ver {
+    pub fn init(info: &AccountInfo, typ: AccountType) -> Result<()> {
+        AccountType::init(info, typ)?;
 
-        let mut signer_info = SignerInfo::from_account_mut(info)?;
-        signer_info.address = H160::default();
+        let mut ver = Ver::from_account_mut(info)?;
+        ver.0 = 0;
+
         Ok(())
     }
 }
 
-impl Data for SignerInfo {
+impl Data for Ver {
     type Item<'a> = Ref<'a, Self>;
     type ItemMut<'a> = RefMut<'a, Self>;
 
@@ -40,7 +36,6 @@ impl Data for SignerInfo {
         size_of::<Self>()
     }
     fn offset(info: &AccountInfo) -> usize {
-        // account_type | signer_info
         AccountType::offset(info) + AccountType::size(info)
     }
 }

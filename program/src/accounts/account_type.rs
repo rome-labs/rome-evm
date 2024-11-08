@@ -17,14 +17,14 @@ pub enum AccountType {
     TxHolder = 3,
     StateHolder = 4,
     RoLock = 5,
-    SignerInfo = 6,
-    OwnerInfo = 7,
+    OwnerInfo = 6,
 }
 
 impl AccountType {
     pub fn init(info: &AccountInfo, new: AccountType) -> Result<()> {
         let mut old = AccountType::from_account_mut(info)?;
 
+        // TODO: create_pda must fill 0
         if *old != AccountType::New {
             return Err(AccountInitialized(*info.key));
         }
@@ -34,21 +34,6 @@ impl AccountType {
         Ok(())
     }
 
-    pub fn switch_holder(info: &AccountInfo, new: AccountType) -> Result<bool> {
-        let mut current = AccountType::from_account_mut(info)?;
-
-        if *current != AccountType::TxHolder && *current != AccountType::StateHolder {
-            return Err(AccountInitialized(*info.key));
-        }
-        assert!(new == AccountType::TxHolder || new == AccountType::StateHolder);
-
-        if new != *current {
-            *current = new;
-            return Ok(true);
-        }
-
-        Ok(false)
-    }
     pub fn check_owner(info: &AccountInfo, program_id: &Pubkey) -> Result<()> {
         if info.owner != program_id {
             return Err(InvalidOwner(*info.key));
@@ -81,7 +66,6 @@ impl Data for AccountType {
         0
     }
     fn size(_info: &AccountInfo) -> usize {
-        assert_eq!(size_of::<Self>(), 1);
         size_of::<Self>()
     }
 }

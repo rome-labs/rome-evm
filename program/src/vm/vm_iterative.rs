@@ -22,6 +22,8 @@ pub enum MachineIterative {
     Serialize(Box<Self>),
     AllocateHolder,
     Allocate,
+    MergeSlots,
+    AllocateStorage,
     Unlock,
     NextIteration(Box<Self>),
     Error,
@@ -39,6 +41,8 @@ impl From<Iterations> for MachineIterative {
             Iterations::Execute => Execute,
             Iterations::AllocateHolder => AllocateHolder,
             Iterations::Allocate => Allocate,
+            Iterations::MergeSlots => MergeSlots,
+            Iterations::AllocateStorage => AllocateStorage,
             Iterations::Commit => Commit,
             Iterations::Unlock => Unlock,
             Iterations::Error => Error,
@@ -53,11 +57,30 @@ impl From<&MachineIterative> for Iterations {
             Execute => Iterations::Execute,
             AllocateHolder => Iterations::AllocateHolder,
             Allocate => Iterations::Allocate,
+            MergeSlots => Iterations::MergeSlots,
+            AllocateStorage => Iterations::AllocateStorage,
             Commit => Iterations::Commit,
             Unlock => Iterations::Unlock,
             Error => Iterations::Error,
             _ => panic!("VmFault: MachineIterativeative to Iterations cast error"),
         }
+    }
+}
+
+impl<'a, T: Origin + Allocate, L: AccountLock + Context> Vm<'a, T, MachineIterative, L> {
+    #[allow(dead_code)]
+    pub fn new_iterative(state: &'a T, context: &'a L) -> Result<Box<Self>> {
+        let handler = JournaledState::new(state)?;
+
+        Ok(Box::new(Self {
+            snapshot: None,
+            handler,
+            state_machine: None,
+            return_value: None,
+            exit_reason: None,
+            context,
+            steps_executed: 0,
+        }))
     }
 }
 
@@ -75,16 +98,15 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
                 msg!("FromStateHolder");
                 // found allocations (it can be holder account) in current iteration
                 if self.handler.state.allocated() > 0 {
-                    msg!("allocated: {}", self.handler.state.allocated());
                     NextIteration(Box::new(Lock))
                 } else {
-                    // state_holder stores hash of the current tx
-                    if self.context.is_tx_binded_to_holder()? {
+                    // state_holder stores tx_hash and session_id
+                    if self.context.exists_session()? {
                         let iteration = self.context.restore_iteration()?;
                         iteration.into()
                     } else {
-                        //start execution from beginnig
-                        msg!("tx in not binded");
+                        //start execution from the very beginning
+                        msg!("session not found");
                         Lock
                     }
                 }
@@ -93,7 +115,7 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
                 msg!("Lock");
                 self.context.lock()?;
                 // save tx_hash to state_holder
-                self.context.bind_tx_to_holder()?;
+                self.context.new_session()?;
                 Init
             }
             Init => {
@@ -108,7 +130,7 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
             }
             Serialize(to) => {
                 msg!("Serialize");
-                match self.context.serialize_vm(self) {
+                match self.context.serialize(self) {
                     Err(IoError(io)) => {
                         // not enough space
                         match io.kind() {
@@ -133,10 +155,10 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
             }
             Execute => {
                 msg!("Execute");
+                self.context.deserialize(self)?;
                 if !self.context.locked()? {
                     NextIteration(Box::new(Lock))
                 } else {
-                    self.context.deserialize_vm(self)?;
                     IntoTrap
                 }
             }
@@ -157,18 +179,34 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
             }
             Allocate => {
                 msg!("Allocate");
+                self.context.deserialize(self)?;
+                if !self.context.locked()? {
+                    NextIteration(Box::new(Lock))
+                } else if self.handler.allocate(self.context)? {
+                    Serialize(Box::new(MergeSlots))
+                } else {
+                    Serialize(Box::new(Allocate))
+                }
+            }
+            MergeSlots => {
+                msg!("MergeSlots");
+                self.context.deserialize(self)?;
                 if !self.context.locked()? {
                     NextIteration(Box::new(Lock))
                 } else {
-                    self.context.deserialize_vm(self)?;
-                    let is_allocated = self.handler.allocate()?;
-                    self.context.lock_new_one()?; // lock new allocated accounts
-
-                    if is_allocated {
-                        GasTransfer
-                    } else {
-                        Exit
-                    }
+                    self.handler.merge_slots()?;
+                    Serialize(Box::new(AllocateStorage))
+                }
+            }
+            AllocateStorage => {
+                msg!("AllocateStorage");
+                self.context.deserialize(self)?;
+                if !self.context.locked()? {
+                    NextIteration(Box::new(Lock))
+                } else if self.handler.alloc_slots(self.context)? {
+                    GasTransfer
+                } else {
+                    Serialize(Box::new(AllocateStorage))
                 }
             }
             GasTransfer => {
@@ -178,11 +216,11 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
             }
             Commit => {
                 msg!("Commit");
+                self.context.deserialize(self)?;
                 if !self.context.locked()? {
                     NextIteration(Box::new(Lock))
                 } else {
-                    self.context.deserialize_vm(self)?;
-                    self.handler.commit()?;
+                    self.handler.commit(self.context)?;
                     self.log_gas_transfer();
                     self.log_exit_reason()?;
                     NextIteration(Box::new(Unlock))
@@ -214,28 +252,10 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
         loop {
             self.advance()?;
             if let Some(Exit) = self.state_machine.as_ref() {
-                msg!("Exit");
                 break;
             }
         }
 
         Ok(())
-    }
-}
-
-impl<'a, T: Origin + Allocate, L: AccountLock + Context> Vm<'a, T, MachineIterative, L> {
-    #[allow(dead_code)]
-    pub fn new_iterative(state: &'a T, context: &'a L) -> Result<Box<Self>> {
-        let handler = JournaledState::new(state)?;
-
-        Ok(Box::new(Self {
-            snapshot: None,
-            handler,
-            state_machine: None,
-            return_value: None,
-            exit_reason: None,
-            context,
-            steps_executed: 0,
-        }))
     }
 }

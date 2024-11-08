@@ -92,7 +92,7 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
 
     pub fn call_snapshot(&mut self, call: CallInterrupt) -> Result<Box<Snapshot>> {
         msg!(
-            "Call: from {}, contract {}",
+            "Call: from {}, to {}",
             &hex::encode(call.context.caller),
             &hex::encode(call.context.address)
         );
@@ -172,7 +172,7 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         self.handler.origin = Some(tx.from());
         self.handler.gas_limit = Some(tx.gas_limit());
         self.handler.gas_price = Some(tx.gas_price());
-        self.handler.gas_recipient = self.context.gas_recipient()?;
+        self.handler.gas_recipient = self.context.fee_recipient();
 
         Ok(snapshot)
     }
@@ -259,7 +259,6 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
     }
 
     pub fn add_snapshot(&mut self, mut new: Box<Snapshot>) {
-        msg!("AddSnapshot");
         new.parent = self.snapshot.take();
         self.snapshot = Some(new);
         // TODO: remove mutable and from fields from JournaledState,
@@ -273,7 +272,6 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
     }
 
     pub fn remove_snapshot(&mut self) -> Option<Box<Snapshot>> {
-        msg!("RemoveSnapshot");
         if let Some(mut snapshot) = self.snapshot.take() {
             self.snapshot = snapshot.parent.take();
             self.handler.mutable = self.is_mut();

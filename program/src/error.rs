@@ -121,6 +121,9 @@ pub enum RomeProgramError {
     #[error("Account is locked: {0} {1:?}")]
     AccountLocked(Pubkey, Option<LockType>),
 
+    #[error("Account to write to read-only locked account: {0}")]
+    AttemptWriteRoAccount(Pubkey),
+
     #[error("StateHolder's iteration cast error: {0}")]
     IterationCastError(String),
 
@@ -141,7 +144,6 @@ pub enum RomeProgramError {
 
     #[error("Unregistered chain_id: {0} ")]
     UnregisteredChainId(u64),
-
 }
 
 impl From<ProgramError> for RomeProgramError {

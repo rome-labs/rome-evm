@@ -2,10 +2,12 @@ use {
     super::Emulation,
     crate::{state::State, ContextAtomic},
     rome_evm::{
+        api::split_fee,
         error::Result,
         origin::Origin,
         tx::tx::Tx,
         vm::{self, vm_atomic::MachineAtomic, Execute},
+        H160,
     },
     solana_client::rpc_client::RpcClient,
     solana_program::{msg, pubkey::Pubkey},
@@ -19,13 +21,14 @@ pub fn do_tx<'a>(
     client: Arc<RpcClient>,
 ) -> Result<Emulation> {
     msg!("Instruction: Atomic transaction");
-    let tx = Tx::from_instruction(data)?;
+    let (fee_addr, rlp) = split_fee(data)?;
+    let tx = Tx::from_instruction(rlp)?;
     let state = State::new(program_id, Some(*signer), client, tx.chain_id())?;
-    atomic_transaction(state, tx)
+    atomic_transaction(state, tx, fee_addr)
 }
 
-pub fn atomic_transaction(state: State, tx: Tx) -> Result<Emulation> {
-    let context = ContextAtomic::new(&state, tx);
+pub fn atomic_transaction(state: State, tx: Tx, fee_addr: Option<H160>) -> Result<Emulation> {
+    let context = ContextAtomic::new(&state, tx, fee_addr);
     let mut vm = vm::Vm::new_atomic(&state, &context)?;
     vm.consume(MachineAtomic::Lock)?;
 
@@ -39,6 +42,8 @@ pub fn atomic_transaction(state: State, tx: Tx) -> Result<Emulation> {
         state.deallocated(),
         *state.alloc_state.borrow(),
         *state.dealloc_state.borrow(),
+        vec![],
+        state.syscall.count(),
     );
 
     report

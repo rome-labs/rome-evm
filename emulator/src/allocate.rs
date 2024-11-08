@@ -1,49 +1,109 @@
 use {
     crate::state::State,
     rome_evm::{
+        context::account_lock::AccountLock,
         error::{Result, RomeProgramError::*},
+        pda::Seed,
         state::{allocate::Allocate, origin::Origin},
-        AccountState, Code, Data, H160, U256,
+        AccountState, AccountType, Code, Data, Slot, Storage, H160,
     },
-    solana_program::account_info::IntoAccountInfo,
+    solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey},
+    std::mem::size_of,
 };
 
 impl Allocate for State<'_> {
-    fn allocate_balance(&self, address: &H160) -> Result<()> {
+    fn alloc_balance<L: AccountLock>(&self, address: &H160, _context: &L) -> Result<()> {
         let _ = self.info_addr(address, true)?;
+
         Ok(())
     }
-    fn allocate_storage(&self, address: &H160, slot: &U256) -> Result<()> {
-        let _ = self.info_slot(address, slot, true)?;
-        //TODO: implement slot allocation
-        Ok(())
-    }
-    fn allocate_contract(&self, address: &H160, code: &[u8], valids: &[u8]) -> Result<bool> {
+    fn alloc_contract<L: AccountLock>(
+        &self,
+        address: &H160,
+        code: &[u8],
+        valids: &[u8],
+        _context: &L,
+    ) -> Result<bool> {
         let mut bind = self.info_addr(address, true)?;
 
-        let difference = {
+        let diff = {
             let info = bind.into_account_info();
+            AccountState::check_no_contract(&info, address)?;
 
-            if AccountState::is_contract(&info)? {
-                return Err(DeployContractToExistingAccount(*address));
-            }
-
-            let required = Code::offset(&info) + code.len() + valids.len();
+            let req = Code::offset(&info) + code.len() + valids.len();
             // TODO: implement deallocation
-            if info.data_len() > required {
+            if info.data_len() > req {
                 return Err(Unimplemented("the contract deployment space must be deallocated according to size of the contract".to_string()));
             }
 
-            required.saturating_sub(info.data_len())
+            req.saturating_sub(info.data_len())
         };
 
-        let max = self.available_for_allocation();
-        let resize = if difference > max { max } else { difference };
+        let limit = self.alloc_limit();
+        let len = diff.min(limit);
 
-        let len = bind.1.data.len() + resize;
-        self.realloc(&mut bind, len)?;
+        let new_len = bind.1.data.len() + len;
+        self.realloc(&mut bind, new_len)?;
         self.update(bind)?;
 
-        Ok(difference <= max)
+        Ok(diff <= limit)
+    }
+
+    fn alloc_slots<L: AccountLock>(
+        &self,
+        key: &Pubkey,
+        _: &Seed,
+        new: usize,
+        _context: &L,
+        address: &H160,
+    ) -> Result<bool> {
+        let mut bind = self.info_pda(key, AccountType::Storage, Some(*address), true)?;
+        let limit = self.alloc_limit() / size_of::<Slot>();
+
+        let (len, diff) = {
+            let info = bind.into_account_info();
+            let unused = Storage::unused_len(&info)?;
+            let diff = new.saturating_sub(unused);
+
+            Storage::available(&info, diff)?;
+
+            let diff_limited = diff.min(limit);
+            let len = info.data_len() + diff_limited * size_of::<Slot>();
+
+            (len, diff)
+        };
+
+        self.realloc(&mut bind, len)?;
+        self.update(bind)?;
+        msg!("allocate slots {}, diff {}", key, diff);
+
+        Ok(diff <= limit)
+    }
+
+    fn alloc_slots_unchecked(
+        &self,
+        key: &Pubkey,
+        _: &Seed,
+        new: usize,
+        address: &H160,
+    ) -> Result<()> {
+        let mut bind = self.info_pda(key, AccountType::Storage, Some(*address), true)?;
+
+        let (len, diff) = {
+            let info = bind.into_account_info();
+            let unused = Storage::unused_len(&info)?;
+            let diff = new.saturating_sub(unused);
+
+            Storage::available(&info, diff)?;
+
+            let len = info.data_len() + diff * size_of::<Slot>();
+            (len, diff)
+        };
+
+        self.realloc(&mut bind, len)?;
+        self.update(bind)?;
+        msg!("allocate slots {}, diff {}", key, diff);
+
+        Ok(())
     }
 }

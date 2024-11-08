@@ -3,9 +3,10 @@ start_slot: 0
 solana:
   rpc_url: "http://solana:8899"
   commitment: "confirmed"
-program_keypair: "/opt/ci/rome-keypair.json"
-payer_keypair: "/opt/ci/proxy/upgrade-authority-keypair.json"
-number_holders: 256
+program_id: "CmobH2vR6aUtQ8x4xd1LYNiH6k2G7PFT5StTgWqvy2VU"
+payers:
+  - payer_keypair: "/opt/ci/proxy/upgrade-authority-keypair.json"
+    number_holders: 32
 proxy_host: "0.0.0.0:9090"
 
 

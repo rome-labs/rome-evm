@@ -1,32 +1,27 @@
 use {
     crate::{
         context::ContextIterative,
-        error::{Result, RomeProgramError::InvalidInstructionData},
+        error::Result,
+        split_fee, split_hash, split_u64,
         state::State,
         vm::{vm_iterative::MachineIterative::FromStateHolder, Execute, Vm},
         Holder,
     },
-    evm::H256,
+    evm::{H160, H256},
     solana_program::{account_info::AccountInfo, msg, pubkey::Pubkey},
-    std::{convert::TryInto, mem::size_of},
 };
 
-// unique | holder_index | tx_hash | chain_id | lock_overrides
-pub fn args(data: &[u8]) -> Result<(u64, H256, u64, &[u8])> {
-    if data.len() < size_of::<u64>() + size_of::<u64>() + size_of::<H256>() + size_of::<u64>() {
-        return Err(InvalidInstructionData);
-    }
-    let (_, right) = data.split_at(size_of::<u64>());
-    let (left, right) = right.split_at(size_of::<u64>());
-    let holder = u64::from_le_bytes(left.try_into().unwrap());
+// unique | session | holder_index | tx_hash | chain_id | Option<fee_recipient> | lock_overrides
+#[allow(clippy::type_complexity)]
+pub fn args(data: &[u8]) -> Result<(u64, u64, H256, u64, Option<H160>, &[u8])> {
+    let (_, data) = split_u64(data)?;
+    let (session, data) = split_u64(data)?;
+    let (holder, data) = split_u64(data)?;
+    let (hash, data) = split_hash(data)?;
+    let (chain, data) = split_u64(data)?;
+    let (fee_addr, lock_overrides) = split_fee(data)?;
 
-    let (left, right) = right.split_at(size_of::<H256>());
-    let hash = H256::from_slice(left);
-
-    let (left, lock_overrides) = right.split_at(size_of::<u64>());
-    let chain = u64::from_le_bytes(left.try_into().unwrap());
-
-    Ok((holder, hash, chain, lock_overrides))
+    Ok((session, holder, hash, chain, fee_addr, lock_overrides))
 }
 
 pub fn do_tx_holder_iterative<'a>(
@@ -36,12 +31,21 @@ pub fn do_tx_holder_iterative<'a>(
 ) -> Result<()> {
     msg!("Instruction: Iterative transaction from holder");
 
-    let (holder, hash, chain, lock_overrides) = args(data)?;
+    let (session, holder, hash, chain, fee_addr, lock_overrides) = args(data)?;
     let state = State::new(program_id, accounts, chain)?;
     let info = state.info_tx_holder(holder, false)?;
     let tx = Holder::tx(info, hash, chain)?;
 
-    let context = ContextIterative::new(&state, accounts, holder, lock_overrides, tx, hash)?;
+    let context = ContextIterative::new(
+        &state,
+        accounts,
+        holder,
+        lock_overrides,
+        tx,
+        hash,
+        session,
+        fee_addr,
+    )?;
     let mut vm = Vm::new_iterative(&state, &context)?;
     vm.consume(FromStateHolder)
 }

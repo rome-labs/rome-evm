@@ -1,17 +1,19 @@
 use {
     crate::{
         accounts::{AccountState, Data},
+        context::account_lock::AccountLock,
         error::{Result, RomeProgramError::*},
         info::Info,
+        pda::{Pda, Seed},
         state::State,
-        AddressTable, Code, Storage, EVENT_LOG,
+        Code, EVENT_LOG,
     },
     evm::{H160, H256, U256},
     solana_program::{
-        clock::Slot, entrypoint::MAX_PERMITTED_DATA_INCREASE, log::sol_log_data, msg,
-        pubkey::Pubkey, sysvar::recent_blockhashes,
+        clock::Slot, entrypoint::MAX_PERMITTED_DATA_INCREASE, log::sol_log_data, pubkey::Pubkey,
+        sysvar::recent_blockhashes,
     },
-    std::{cmp::Ordering::*, mem::size_of},
+    std::cmp::Ordering::*,
 };
 
 pub trait Origin {
@@ -23,11 +25,33 @@ pub trait Origin {
     fn valids(&self, address: &H160) -> Result<Vec<u8>>;
     fn storage(&self, address: &H160, slot: &U256) -> Result<Option<U256>>;
 
-    fn inc_nonce(&self, address: &H160) -> Result<()>;
-    fn add_balance(&self, address: &H160, balance: &U256) -> Result<()>;
-    fn sub_balance(&self, address: &H160, balance: &U256) -> Result<()>;
-    fn set_code(&self, address: &H160, code: &[u8], valids: &[u8]) -> Result<()>;
-    fn set_storage(&self, address: &H160, slot: &U256, value: &U256) -> Result<()>;
+    fn inc_nonce<L: AccountLock>(&self, address: &H160, context: &L) -> Result<()>;
+    fn add_balance<L: AccountLock>(
+        &self,
+        address: &H160,
+        balance: &U256,
+        context: &L,
+    ) -> Result<()>;
+    fn sub_balance<L: AccountLock>(
+        &self,
+        address: &H160,
+        balance: &U256,
+        context: &L,
+    ) -> Result<()>;
+    fn set_code<L: AccountLock>(
+        &self,
+        address: &H160,
+        code: &[u8],
+        valids: &[u8],
+        context: &L,
+    ) -> Result<()>;
+    fn set_storage<L: AccountLock>(
+        &self,
+        address: &H160,
+        slot: &U256,
+        value: &U256,
+        context: &L,
+    ) -> Result<()>;
     fn block_hash(&self, block: U256, slot: Slot) -> Result<H256>;
     fn set_logs(&self, address: &H160, topics: &[H256], data: &[u8]) -> Result<()> {
         match topics.len() {
@@ -73,9 +97,13 @@ pub trait Origin {
     }
     fn allocated(&self) -> usize;
     fn deallocated(&self) -> usize;
-    fn available_for_allocation(&self) -> usize {
+    fn alloc_limit(&self) -> usize {
         MAX_PERMITTED_DATA_INCREASE.saturating_sub(self.allocated())
     }
+    fn serialize_pda(&self, into: &mut &mut [u8]) -> Result<()>;
+    fn deserialize_pda(&self, from: &mut &[u8]) -> Result<()>;
+    fn slot_to_key(&self, address: &H160, slot: &U256) -> (Pubkey, Seed, u8);
+    fn syscalls(&self) -> u64;
 }
 
 impl Origin for State<'_> {
@@ -105,37 +133,50 @@ impl Origin for State<'_> {
     }
 
     fn storage(&self, address: &H160, slot: &U256) -> Result<Option<U256>> {
-        let (info, sub_index) = self.info_slot(address, slot, false)?;
-        msg!("slot storage_key {} {}", slot, info.key);
-        Info::storage(self, info, sub_index)
+        let (info, sub_ix) = self.info_slot(address, slot, false)?;
+        Info::storage(self, info, sub_ix)
     }
 
-    fn inc_nonce(&self, address: &H160) -> Result<()> {
+    fn inc_nonce<L: AccountLock>(&self, address: &H160, context: &L) -> Result<()> {
         let info = self.info_addr(address, true)?;
-        Info::inc_nonce(self, info)
+        Info::inc_nonce(self, info, context)
     }
 
-    fn add_balance(&self, address: &H160, balance: &U256) -> Result<()> {
+    fn add_balance<L: AccountLock>(
+        &self,
+        address: &H160,
+        balance: &U256,
+        context: &L,
+    ) -> Result<()> {
         let info = self.info_addr(address, true)?;
-        Info::add_balance(self, info, balance)
+        Info::add_balance(self, info, balance, context)
     }
 
-    fn sub_balance(&self, address: &H160, balance: &U256) -> Result<()> {
+    fn sub_balance<L: AccountLock>(
+        &self,
+        address: &H160,
+        balance: &U256,
+        context: &L,
+    ) -> Result<()> {
         let info = self.info_addr(address, true)?;
-        Info::sub_balance(self, info, balance, address)
+        Info::sub_balance(self, info, balance, address, context)
     }
 
-    fn set_code(&self, address: &H160, code: &[u8], valids: &[u8]) -> Result<()> {
+    fn set_code<L: AccountLock>(
+        &self,
+        address: &H160,
+        code: &[u8],
+        valids: &[u8],
+        context: &L,
+    ) -> Result<()> {
         let info = self.info_addr(address, true)?;
-        if AccountState::is_contract(info)? {
-            return Err(DeployContractToExistingAccount(*address));
-        }
+        AccountState::check_no_contract(info, address)?;
 
         let len = info.data_len();
         let offset = Code::offset(info);
         let required = offset + code.len() + valids.len();
 
-        msg!("set_code data.len(): {}, required: {}", len, required);
+        // TODO move allocation to trait for use in the emulator
         match len.cmp(&required) {
             Less => {
                 self.realloc(info, required)?;
@@ -155,26 +196,18 @@ impl Origin for State<'_> {
             _ => {}
         }
 
-        Info::set_code(self, info, code, valids, address)
+        Info::set_code(self, info, code, valids, address, context)
     }
 
-    fn set_storage(&self, address: &H160, slot: &U256, value: &U256) -> Result<()> {
-        let (info, sub_index) = self.info_slot(address, slot, true)?;
-
-        let allocate = {
-            let table = AddressTable::from_account(info)?;
-            let index = table.get(sub_index) as usize;
-            index == 0
-        };
-
-        if allocate {
-            self.realloc(info, info.data_len() + size_of::<Storage>())?;
-            let len = Storage::from_account(info)?.len();
-            let mut table = AddressTable::from_account_mut(info)?;
-            table.set(sub_index, len);
-        }
-
-        Info::set_storage(self, info, sub_index, value)
+    fn set_storage<L: AccountLock>(
+        &self,
+        address: &H160,
+        slot: &U256,
+        value: &U256,
+        context: &L,
+    ) -> Result<()> {
+        let (info, sub_ix) = self.info_slot(address, slot, true)?;
+        Info::set_storage(self, info, sub_ix, value, context)
     }
 
     fn block_hash(&self, block: U256, slot: Slot) -> Result<H256> {
@@ -188,5 +221,24 @@ impl Origin for State<'_> {
 
     fn deallocated(&self) -> usize {
         *self.deallocated.borrow()
+    }
+
+    fn serialize_pda(&self, into: &mut &mut [u8]) -> Result<()> {
+        self.pda.serialize(into)
+    }
+
+    fn deserialize_pda(&self, from: &mut &[u8]) -> Result<()> {
+        self.pda.deserialize(from)
+    }
+
+    fn slot_to_key(&self, address: &H160, slot: &U256) -> (Pubkey, Seed, u8) {
+        let (index_be, sub_ix) = Pda::storage_index(slot);
+        let (base, _) = self.pda.balance_key(address);
+        let (key, seed) = self.pda.storage_key(&base, index_be);
+
+        (key, seed, sub_ix)
+    }
+    fn syscalls(&self) -> u64 {
+        self.syscall.count()
     }
 }

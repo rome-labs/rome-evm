@@ -1,13 +1,18 @@
 use {
     super::{Diff, Journal},
-    crate::{error::RomeProgramError::*, error::*, origin::Origin, state::Allocate},
+    crate::{
+        context::account_lock::AccountLock, error::RomeProgramError::*, error::*, origin::Origin,
+        pda::Seed, state::Allocate, NUMBER_ALLOC_DIFF_PER_TX,
+    },
     borsh::{BorshDeserialize, BorshSerialize},
     evm::{Handler, H160, H256, U256},
     solana_program::{
         clock::Clock,
         keccak::{hash, hashv},
+        pubkey::Pubkey,
         sysvar::Sysvar,
     },
+    std::collections::{BTreeMap, HashMap, HashSet},
 };
 
 /// JournalState is internal EVM state that is used to contain state and track changes to that state.
@@ -30,6 +35,7 @@ pub struct JournaledState<'a, T: Origin + Allocate> {
     pub gas_limit: Option<U256>,
     pub gas_price: Option<U256>,
     pub gas_recipient: Option<H160>,
+    pub merged_slots: BTreeMap<H160, HashSet<U256>>,
 }
 
 impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
@@ -47,6 +53,7 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
             gas_limit: None,
             gas_price: None,
             gas_recipient: None,
+            merged_slots: BTreeMap::new(),
         };
 
         Ok(journaled_state)
@@ -131,8 +138,8 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
         self.state.block_hash(block, slot)
     }
 
-    pub fn commit(&mut self) -> Result<()> {
-        self.journal.commit(self.state)
+    pub fn commit<L: AccountLock>(&mut self, context: &'a L) -> Result<()> {
+        self.journal.commit(self.state, context)
     }
 
     pub fn serialize(&self, into: &mut &mut [u8]) -> Result<()> {
@@ -145,6 +152,7 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
         self.gas_limit.serialize(into)?;
         self.gas_price.serialize(into)?;
         self.gas_recipient.serialize(into)?;
+        self.merged_slots.serialize(into)?;
         Ok(())
     }
 
@@ -158,6 +166,7 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
         let gas_limit: Option<U256> = BorshDeserialize::deserialize(from)?;
         let gas_price: Option<U256> = BorshDeserialize::deserialize(from)?;
         let gas_recipient: Option<H160> = BorshDeserialize::deserialize(from)?;
+        let merged_slots: BTreeMap<H160, HashSet<U256>> = BorshDeserialize::deserialize(from)?;
 
         Ok(Self {
             state,
@@ -170,10 +179,70 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
             gas_limit,
             gas_price,
             gas_recipient,
+            merged_slots,
         })
     }
 
-    pub fn allocate(&self) -> Result<bool> {
-        self.journal.allocate(self.state)
+    pub fn allocate<L: AccountLock>(&self, context: &'a L) -> Result<bool> {
+        self.journal.alloc_balances(self.state, context)
+    }
+
+    pub fn merge_slots(&mut self) -> Result<()> {
+        // very heavy in terms of CU consumption
+        self.merged_slots = self.journal.merge_slots(self.state)?;
+        Ok(())
+    }
+
+    pub fn alloc_slots<L: AccountLock>(&mut self, context: &'a L) -> Result<bool> {
+        let keys = self.storage_keys(&self.merged_slots)?;
+
+        for (key, (seed, count, address)) in keys.iter() {
+            if self.state.syscalls() >= NUMBER_ALLOC_DIFF_PER_TX || self.state.alloc_limit() < 500 {
+                return Ok(false);
+            }
+
+            if !self
+                .state
+                .alloc_slots(key, seed, *count, context, address)?
+            {
+                return Ok(false);
+            }
+        }
+
+        // no need to serialize/deserialize temporary data
+        self.merged_slots.clear();
+
+        Ok(true)
+    }
+
+    pub fn alloc_slots_unchecked(&self) -> Result<()> {
+        let slots = self.journal.merge_slots(self.state)?;
+        let keys = self.storage_keys(&slots)?;
+
+        for (key, (seed, count, address)) in keys.iter() {
+            self.state
+                .alloc_slots_unchecked(key, seed, *count, address)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn storage_keys(
+        &self,
+        merged_slots: &BTreeMap<H160, HashSet<U256>>,
+    ) -> Result<HashMap<Pubkey, (Seed, usize, H160)>> {
+        let mut keys_new_slots: HashMap<Pubkey, (Seed, usize, H160)> = HashMap::new();
+
+        for (address, set) in merged_slots.iter() {
+            for slot in set {
+                let (key, seed, _) = self.state.slot_to_key(address, slot);
+                keys_new_slots
+                    .entry(key)
+                    .and_modify(|(_, len, _)| *len += 1)
+                    .or_insert((seed, 1, *address));
+            }
+        }
+
+        Ok(keys_new_slots)
     }
 }

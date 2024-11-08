@@ -1,22 +1,20 @@
 use {
-    super::gas_recipient,
+    super::LockOverrides,
     crate::state::State,
     rome_evm::{
         context::{
             account_lock::AccountLock,
-            iterative::{
-                bind_tx_to_holder_impl, deserialize_vm_impl, is_tx_binded_to_holder_impl,
-                restore_iteration_impl, save_iteration_impl, serialize_vm_impl,
-            },
+            iterative::{deserialize_impl, serialize_impl},
             Context,
         },
         error::Result,
         state::{origin::Origin, Allocate},
         tx::tx::Tx,
         vm::{vm_iterative::MachineIterative, Vm},
-        Iterations, H160, H256,
+        Iterations, StateHolder, H160, H256,
     },
-    solana_program::{account_info::IntoAccountInfo, msg},
+    solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey},
+    std::cell::RefCell,
 };
 
 pub struct ContextIterative<'a, 'b> {
@@ -24,10 +22,20 @@ pub struct ContextIterative<'a, 'b> {
     pub holder: u64,
     pub tx: &'b Tx,
     pub tx_hash: H256,
+    pub lock_overrides: RefCell<Vec<Pubkey>>,
+    pub session: u64,
+    pub fee_addr: Option<H160>,
 }
 
 impl<'a, 'b> ContextIterative<'a, 'b> {
-    pub fn new(state: &'b State<'a>, holder: u64, tx: &'b Tx, tx_hash: H256) -> Result<Self> {
+    pub fn new(
+        state: &'b State<'a>,
+        holder: u64,
+        tx: &'b Tx,
+        tx_hash: H256,
+        session: u64,
+        fee_addr: Option<H160>,
+    ) -> Result<Self> {
         // allocation affects the vm behaviour.
         // it is important to allocate state_holder before the starting the vm
         let state_holder = state.info_state_holder(holder, true)?;
@@ -38,6 +46,9 @@ impl<'a, 'b> ContextIterative<'a, 'b> {
             holder,
             tx,
             tx_hash,
+            lock_overrides: RefCell::new(vec![]),
+            session,
+            fee_addr,
         })
     }
 }
@@ -50,61 +61,66 @@ impl<'a, 'b> Context for ContextIterative<'a, 'b> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
 
-        save_iteration_impl(&info, iteration)?;
+        StateHolder::set_iteration(&info, iteration)?;
         self.state.update(bind)
     }
     fn restore_iteration(&self) -> Result<Iterations> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
 
-        restore_iteration_impl(&info)
+        StateHolder::get_iteration(&info)
     }
-    fn serialize_vm<T: Origin + Allocate, L: AccountLock + Context>(
+    fn serialize<T: Origin + Allocate, L: AccountLock + Context>(
         &self,
         vm: &Vm<T, MachineIterative, L>,
     ) -> Result<()> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
 
-        serialize_vm_impl(&info, vm)?;
+        serialize_impl(&info, vm, self.state)?;
         self.state.update(bind)
     }
-    fn deserialize_vm<T: Origin + Allocate, L: AccountLock + Context>(
+    fn deserialize<T: Origin + Allocate, L: AccountLock + Context>(
         &self,
         vm: &mut Vm<T, MachineIterative, L>,
     ) -> Result<()> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
 
-        deserialize_vm_impl(&info, vm)
+        deserialize_impl(&info, vm, self.state)
     }
     fn allocate_holder(&self) -> Result<()> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
-        let len = bind.1.data.len() + self.state.available_for_allocation();
+        let len = bind.1.data.len() + self.state.alloc_limit();
         self.state.realloc(&mut bind, len)?;
         self.state.update(bind)
     }
 
-    fn bind_tx_to_holder(&self) -> Result<()> {
+    fn new_session(&self) -> Result<()> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
 
-        bind_tx_to_holder_impl(&info, self.tx_hash)?;
+        StateHolder::set_link(&info, self.tx_hash, self.session)?;
         self.state.update(bind)
     }
 
-    fn is_tx_binded_to_holder(&self) -> Result<bool> {
+    fn exists_session(&self) -> Result<bool> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
-
-        is_tx_binded_to_holder_impl(&info, self.tx_hash)
+        StateHolder::is_linked(&info, self.tx_hash, self.session)
     }
 
     fn tx_hash(&self) -> H256 {
         self.tx_hash
     }
 
-    fn gas_recipient(&self) -> Result<Option<H160>> {
-        gas_recipient(self.state)
+    fn fee_recipient(&self) -> Option<H160> {
+        self.fee_addr
+    }
+}
+
+impl<'a, 'b> LockOverrides for ContextIterative<'a, 'b> {
+    fn lock_overrides(&self) -> Vec<Pubkey> {
+        self.lock_overrides.borrow().clone()
     }
 }

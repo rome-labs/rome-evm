@@ -8,24 +8,9 @@ pub use atomic::ContextAtomic;
 pub use context_eth_call::ContextEthCall;
 pub use estimate_gas::ContextEstimateGas;
 pub use iterative::ContextIterative;
+use solana_program::pubkey::Pubkey;
 
-use {
-    crate::state::State,
-    rome_evm::{
-        accounts::{Data, SignerInfo},
-        error::*,
-        H160,
-    },
-    solana_program::account_info::IntoAccountInfo,
-};
 
-pub fn gas_recipient(state: &State) -> Result<Option<H160>> {
-    let signer = state.signer.unwrap();
-    if let Ok(mut bind) = state.info_signer_info(&signer, false) {
-        let info = bind.into_account_info();
-        let signer_info = SignerInfo::from_account(&info)?;
-        Ok(Some(signer_info.address))
-    } else {
-        Ok(None)
-    }
+pub trait LockOverrides {
+    fn lock_overrides(&self) -> Vec<Pubkey>;
 }

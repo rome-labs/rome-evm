@@ -2,29 +2,24 @@ use {
     super::{do_tx_iterative::iterative_tx, Emulation},
     crate::{context::ContextIterative, state::State},
     rome_evm::{
-        error::{Result, RomeProgramError::*},
-        Holder, H256,
+        api::{split_fee, split_hash, split_u64},
+        error::Result,
+        Holder, H160, H256,
     },
     solana_client::rpc_client::RpcClient,
     solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey},
-    std::{mem::size_of, sync::Arc},
+    std::sync::Arc,
 };
 
-// holder_index | tx_hash | chain_id
-pub fn args(data: &[u8]) -> Result<(u64, H256, u64)> {
-    if data.len() != size_of::<u64>() + size_of::<H256>() + size_of::<u64>() {
-        return Err(InvalidInstructionData);
-    }
+// session | holder_index | tx_hash | chain_id | Option<fee_recipient>
+pub fn args(data: &[u8]) -> Result<(u64, u64, H256, u64, Option<H160>)> {
+    let (session, data) = split_u64(data)?;
+    let (holder, data) = split_u64(data)?;
+    let (hash, data) = split_hash(data)?;
+    let (chain, data) = split_u64(data)?;
+    let (fee_addr, _) = split_fee(data)?;
 
-    let (left, right) = data.split_at(size_of::<u64>());
-    let holder = u64::from_le_bytes(left.try_into().unwrap());
-
-    let (left, right) = right.split_at(size_of::<H256>());
-    let hash = H256::from_slice(left);
-
-    let chain = u64::from_le_bytes(right.try_into().unwrap());
-
-    Ok((holder, hash, chain))
+    Ok((session, holder, hash, chain, fee_addr))
 }
 
 pub fn do_tx_holder_iterative<'a>(
@@ -35,13 +30,13 @@ pub fn do_tx_holder_iterative<'a>(
 ) -> Result<Emulation> {
     msg!("Instruction: Iterative transaction from holder");
 
-    let (holder, hash, chain) = args(data)?;
+    let (session, holder, hash, chain, fee_addr) = args(data)?;
     let state = State::new(program_id, Some(*signer), Arc::clone(&client), chain)?;
 
     let mut bind = state.info_tx_holder(holder, false)?;
     let info = bind.into_account_info();
     let tx = Holder::tx(&info, hash, chain)?;
 
-    let context = ContextIterative::new(&state, holder, &tx, hash)?;
+    let context = ContextIterative::new(&state, holder, &tx, hash, session, fee_addr)?;
     iterative_tx(&state, context)
 }

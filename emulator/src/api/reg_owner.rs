@@ -8,7 +8,7 @@ use {
     },
     solana_client::rpc_client::RpcClient,
     solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey},
-    std::{sync::Arc, mem::size_of},
+    std::{mem::size_of, sync::Arc},
 };
 pub fn reg_owner<'a>(
     program_id: &'a Pubkey,

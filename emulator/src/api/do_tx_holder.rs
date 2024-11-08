@@ -15,12 +15,12 @@ pub fn do_tx_holder<'a>(
 ) -> Result<Emulation> {
     msg!("Instruction: Atomic transaction from holder");
 
-    let (holder, hash, chain) = args(data)?;
+    let (holder, hash, chain, fee_addr) = args(data)?;
     let state = State::new(program_id, Some(*signer), client.clone(), chain)?;
 
     let mut bind = state.info_tx_holder(holder, false)?;
     let info = bind.into_account_info();
     let tx = Holder::tx(&info, hash, chain)?;
 
-    atomic_transaction(state, tx)
+    atomic_transaction(state, tx, fee_addr)
 }

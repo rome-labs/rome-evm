@@ -1,38 +1,43 @@
 use {
     super::Emulation,
-    crate::state::State,
+    crate::{
+        context::{ContextIterative, LockOverrides},
+        state::State,
+    },
     rome_evm::{
+        api::{split_fee, split_u64},
         context::{account_lock::AccountLock, Context},
         error::{Result, RomeProgramError::*},
         origin::Origin,
         tx::tx::Tx,
         vm::{self, vm_iterative::MachineIterative, Execute},
-        H256,
+        H160, H256,
     },
     solana_client::rpc_client::RpcClient,
-    solana_program::{msg, pubkey::Pubkey, keccak},
-    std::{mem::size_of, sync::Arc},
+    solana_program::{keccak, msg, pubkey::Pubkey},
+    std::sync::Arc,
 };
-use crate::ContextIterative;
 
-// holder_index | tx
-pub fn args(data: &[u8]) -> Result<(u64, &[u8])> {
-    if data.len() <= size_of::<u64>() {
-        return Err(InvalidInstructionData);
-    }
-    let (left, tx) = data.split_at(size_of::<u64>());
-    let holder = u64::from_le_bytes(left.try_into().unwrap());
+// session | holder_index | Option<fee_recipient> | tx
+pub fn args(data: &[u8]) -> Result<(u64, u64, Option<H160>, &[u8])> {
+    let (session, data) = split_u64(data)?;
+    let (holder, data) = split_u64(data)?;
+    let (fee_addr, tx) = split_fee(data)?;
 
-    Ok((holder, tx))
+    Ok((session, holder, fee_addr, tx))
 }
 
-pub fn iterative_tx<L: AccountLock + Context>(state: &State, context: L) -> Result<Emulation> {
+pub fn iterative_tx<L: AccountLock + Context + LockOverrides>(
+    state: &State,
+    context: L,
+) -> Result<Emulation> {
     let mut steps = 0;
     let mut iteration = 0;
     let mut alloc = 0;
     let mut dealloc = 0;
     let mut alloc_state = 0;
     let mut dealloc_state = 0;
+    let mut syscalls = 0;
 
     // TODO remove and use unique tx_id in data
     loop {
@@ -46,7 +51,7 @@ pub fn iterative_tx<L: AccountLock + Context>(state: &State, context: L) -> Resu
                 msg!("Lock after emulation");
                 vm.context.lock()?;
                 // restore vm state
-                vm.context.deserialize_vm(&mut vm)?;
+                vm.context.deserialize(&mut vm)?;
 
                 return Emulation::with_vm(
                     state,
@@ -58,17 +63,22 @@ pub fn iterative_tx<L: AccountLock + Context>(state: &State, context: L) -> Resu
                     dealloc,
                     alloc_state,
                     dealloc_state,
+                    vm.context.lock_overrides(),
+                    syscalls,
                 );
             }
             Err(e) => return Err(e),
-            _ => {},
+            _ => {}
         }
         steps += vm.steps_executed;
         alloc += state.allocated();
         dealloc += state.deallocated();
         alloc_state += *state.alloc_state.borrow();
         dealloc_state += *state.dealloc_state.borrow();
-        state.reset_counters();
+        syscalls += state.syscall.count();
+
+        msg!("syscalls: {}", state.syscall.count());
+        state.reset();
     }
 }
 
@@ -80,11 +90,16 @@ pub fn do_tx_iterative<'a>(
 ) -> Result<Emulation> {
     msg!("Instruction: Iterative transaction");
 
-    let (holder, tx) = args(data)?;
+    let (session, holder, fee_addr, tx) = args(data)?;
     let hash = H256::from(keccak::hash(tx).to_bytes());
     let tx = Tx::from_instruction(tx)?;
 
-    let state = State::new(program_id, Some(*signer), Arc::clone(&client), tx.chain_id())?;
-    let context = ContextIterative::new(&state, holder, &tx, hash)?;
+    let state = State::new(
+        program_id,
+        Some(*signer),
+        Arc::clone(&client),
+        tx.chain_id(),
+    )?;
+    let context = ContextIterative::new(&state, holder, &tx, hash, session, fee_addr)?;
     iterative_tx(&state, context)
 }

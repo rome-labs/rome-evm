@@ -1,6 +1,6 @@
 use {
     super::{
-        AccountType, {cast, cast_mut, Data},
+        AccountType, {cast, cast_mut, Data, Ver},
     },
     crate::error::Result,
     evm::H256,
@@ -19,26 +19,54 @@ pub enum Iterations {
     Execute = 3,
     AllocateHolder = 4,
     Allocate = 5,
-    Commit = 6,
-    Unlock = 7,
-    Error = 8,
+    MergeSlots = 6,
+    AllocateStorage = 7,
+    Commit = 8,
+    Unlock = 9,
+    Error = 10, // UnnecessaryIteration
 }
 
+impl Iterations {
+    pub fn is_complete(&self) -> bool {
+        matches!(self, Iterations::Unlock | Iterations::Error)
+    }
+}
 #[repr(C, packed)]
 pub struct StateHolder {
     pub iteration: Iterations,
     pub hash: H256,
+    pub session: u64,
 }
 
 impl StateHolder {
     pub fn init(info: &AccountInfo) -> Result<()> {
-        AccountType::init(info, AccountType::StateHolder)?;
+        Ver::init(info, AccountType::StateHolder)?;
 
         let mut holder = StateHolder::from_account_mut(info)?;
         holder.iteration = Iterations::Lock;
         holder.hash = H256::default();
+        holder.session = 0;
 
         Ok(())
+    }
+    pub fn is_linked(info: &AccountInfo, hash: H256, session: u64) -> Result<bool> {
+        let state_holder = StateHolder::from_account(info)?;
+        Ok(state_holder.hash == hash && state_holder.session == session)
+    }
+    pub fn set_link(info: &AccountInfo, hash: H256, session: u64) -> Result<()> {
+        let mut state_holder = StateHolder::from_account_mut(info)?;
+        state_holder.hash = hash;
+        state_holder.session = session;
+        Ok(())
+    }
+    pub fn set_iteration(info: &AccountInfo, iteration: Iterations) -> Result<()> {
+        let mut state_holder = StateHolder::from_account_mut(info)?;
+        state_holder.iteration = iteration;
+        Ok(())
+    }
+    pub fn get_iteration(info: &AccountInfo) -> Result<Iterations> {
+        let state_holder = StateHolder::from_account(info)?;
+        Ok(state_holder.iteration.clone())
     }
 }
 
@@ -56,6 +84,6 @@ impl Data for StateHolder {
         size_of::<Self>()
     }
     fn offset(info: &AccountInfo) -> usize {
-        AccountType::offset(info) + AccountType::size(info)
+        Ver::offset(info) + Ver::size(info)
     }
 }

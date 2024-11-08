@@ -1,5 +1,5 @@
+use solana_program::account_info::AccountInfo;
 use {
-    super::gas_recipient,
     crate::state::State,
     rome_evm::{
         accounts::{Data, Lock},
@@ -16,10 +16,15 @@ use {
 pub struct ContextAtomic<'a, 'b> {
     pub state: &'b State<'a>,
     pub tx: Tx,
+    pub fee_addr: Option<H160>,
 }
 impl<'a, 'b> ContextAtomic<'a, 'b> {
-    pub fn new(state: &'b State<'a>, tx: Tx) -> Self {
-        Self { state, tx }
+    pub fn new(state: &'b State<'a>, tx: Tx, fee_addr: Option<H160>) -> Self {
+        Self {
+            state,
+            tx,
+            fee_addr,
+        }
     }
 }
 
@@ -33,13 +38,13 @@ impl<'a, 'b> Context for ContextAtomic<'a, 'b> {
     fn restore_iteration(&self) -> Result<Iterations> {
         unreachable!()
     }
-    fn serialize_vm<T: Origin + Allocate, L: AccountLock + Context>(
+    fn serialize<T: Origin + Allocate, L: AccountLock + Context>(
         &self,
         _: &Vm<T, MachineIterative, L>,
     ) -> Result<()> {
         unreachable!()
     }
-    fn deserialize_vm<T: Origin + Allocate, L: AccountLock + Context>(
+    fn deserialize<T: Origin + Allocate, L: AccountLock + Context>(
         &self,
         _: &mut Vm<T, MachineIterative, L>,
     ) -> Result<()> {
@@ -48,17 +53,17 @@ impl<'a, 'b> Context for ContextAtomic<'a, 'b> {
     fn allocate_holder(&self) -> Result<()> {
         unreachable!()
     }
-    fn bind_tx_to_holder(&self) -> Result<()> {
+    fn new_session(&self) -> Result<()> {
         unreachable!()
     }
-    fn is_tx_binded_to_holder(&self) -> Result<bool> {
+    fn exists_session(&self) -> Result<bool> {
         unreachable!()
     }
     fn tx_hash(&self) -> H256 {
         unreachable!()
     }
-    fn gas_recipient(&self) -> Result<Option<H160>> {
-        gas_recipient(self.state)
+    fn fee_recipient(&self) -> Option<H160> {
+        self.fee_addr
     }
 }
 
@@ -86,7 +91,10 @@ impl AccountLock for ContextAtomic<'_, '_> {
     fn unlock(&self) -> Result<()> {
         unreachable!()
     }
-    fn lock_new_one(&self) -> Result<()> {
+    fn lock_new_one(&self, _info: &AccountInfo) -> Result<()> {
         unreachable!()
+    }
+    fn check_writable(&self, _info: &AccountInfo) -> Result<()> {
+        Ok(())
     }
 }

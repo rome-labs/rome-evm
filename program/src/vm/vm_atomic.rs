@@ -71,7 +71,8 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineAtomic>
                 msg!("Commit");
                 self.return_value = Some(return_value);
                 self.exit_reason = Some(reason);
-                self.handler.commit()?;
+                self.handler.alloc_slots_unchecked()?;
+                self.handler.commit(self.context)?;
                 self.log_gas_transfer();
                 self.log_exit_reason()?;
                 Exit

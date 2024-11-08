@@ -14,7 +14,7 @@ pub struct Stubs {
 
 impl Stubs {
     pub fn from_chain(rpc: Arc<RpcClient>) -> Result<Box<Self>> {
-        let keys = sysvar::ALL_IDS.clone();
+        let keys = [sysvar::clock::ID, sysvar::rent::ID];
         let accounts = rpc.get_multiple_accounts(&keys)?;
 
         let mut stubs = Stubs::default();
@@ -30,7 +30,7 @@ impl Stubs {
                 sysvar::rent::ID => {
                     stubs.rent = bincode::deserialize(&acc.data)?;
                 }
-                _ => {}
+                _ => unreachable!(),
             }
         }
 

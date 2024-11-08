@@ -1,6 +1,6 @@
 use {
     super::{
-        AccountType, {cast, cast_mut, Data},
+        AccountType, {cast, cast_mut, Data, Ver},
     },
     crate::{
         error::{Result, RomeProgramError::*},
@@ -18,12 +18,12 @@ use {
 #[repr(C, packed)]
 pub struct TxHolder {
     pub hash: H256,
-    reserved: u8, // TxHolder must have same size as the StateHolder
+    reserved: [u8; 9],
 }
 
 impl TxHolder {
     pub fn init(info: &AccountInfo) -> Result<()> {
-        AccountType::init(info, AccountType::TxHolder)?;
+        Ver::init(info, AccountType::TxHolder)?;
 
         let mut tx_holder = TxHolder::from_account_mut(info)?;
         tx_holder.hash = H256::default();
@@ -54,6 +54,6 @@ impl Data for TxHolder {
         size_of::<Self>()
     }
     fn offset(info: &AccountInfo) -> usize {
-        AccountType::offset(info) + AccountType::size(info)
+        Ver::offset(info) + Ver::size(info)
     }
 }

@@ -4,7 +4,7 @@ mod ecmul;
 mod ecpairing;
 mod ecrecover;
 mod identity;
-mod modexp;
+// mod modexp;
 mod ripemd_160;
 mod sha2_256;
 
@@ -22,8 +22,8 @@ pub fn built_in_contract(address: &H160) -> Option<PrecompileFn> {
         ripemd_160::contract
     } else if *address == identity::ADDRESS {
         identity::contract
-    } else if *address == modexp::ADDRESS {
-        modexp::contract
+    // } else if *address == modexp::ADDRESS {
+    //     modexp::contract
     } else if *address == ecadd::ADDRESS {
         ecadd::contract
     } else if *address == ecmul::ADDRESS {

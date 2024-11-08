@@ -5,9 +5,9 @@ use {
         assert::asserts,
         error::{Result, RomeProgramError::*},
         origin::Origin,
-        state::pda::Pda,
+        state::{pda::Pda, Syscall},
         AccountType::{self, *},
-        Data, H160, U256, OwnerInfo,
+        Data, OwnerInfo, H160, U256,
     },
     solana_client::rpc_client::RpcClient,
     solana_program::{
@@ -38,6 +38,7 @@ pub struct State<'a> {
     pub dealloc_state: RefCell<usize>,
     pub pda: Pda<'a>,
     pub chain: u64,
+    pub syscall: Syscall,
 }
 
 pub type Bind = (Pubkey, Account);
@@ -66,6 +67,7 @@ impl<'a> State<'a> {
         asserts();
         let stubs = Stubs::from_chain(Arc::clone(&client))?;
         set_syscall_stubs(stubs);
+        let syscall = Syscall::new();
 
         let state = Self {
             client,
@@ -77,8 +79,9 @@ impl<'a> State<'a> {
             dealloc: RefCell::new(0),
             alloc_state: RefCell::new(0),
             dealloc_state: RefCell::new(0),
-            pda: Pda::new(program_id, chain),
+            pda: Pda::new(program_id, chain, syscall.clone()),
             chain,
+            syscall,
         };
 
         if let Some(signer) = signer {
@@ -104,52 +107,46 @@ impl<'a> State<'a> {
 
     pub fn info_addr(&self, address: &H160, or_create: bool) -> Result<Bind> {
         let key = self.pda.balance_key(address).0;
-        self.info_pda(key, Balance, Some(*address), or_create)
+        self.info_pda(&key, Balance, Some(*address), or_create)
     }
-    pub fn info_slot(&self, address: &H160, slot: &U256, or_create: bool) -> Result<(Bind, usize)> {
-        let (index_be, subindex) = Pda::storage_index(slot);
-        let base = self.info_addr(address, or_create)?.0;
-        let key = self.pda.storage_key(&base, index_be).0;
-        let bind = self.info_pda(key, Storage, Some(*address), or_create)?;
+    pub fn info_slot(&self, address: &H160, slot: &U256, or_create: bool) -> Result<(Bind, u8)> {
+        let (key, _, sub_ix) = self.slot_to_key(address, slot);
+        let bind = self.info_pda(&key, Storage, Some(*address), or_create)?;
         self.update_slots(address, slot, or_create);
 
-        Ok((bind, subindex))
+        Ok((bind, sub_ix))
     }
     pub fn info_tx_holder(&self, index: u64, or_create: bool) -> Result<Bind> {
         let signer = self.signer.expect("signer expected");
         let (key, _) = self.pda.tx_holder_key(&signer, index);
-        self.info_pda(key, TxHolder, None, or_create)
+        self.info_pda(&key, TxHolder, None, or_create)
     }
     pub fn info_state_holder(&self, index: u64, or_create: bool) -> Result<Bind> {
         let signer = self.signer.expect("signer expected");
         let (key, _) = self.pda.state_holder_key(&signer, index);
-        self.info_pda(key, StateHolder, None, or_create)
+        self.info_pda(&key, StateHolder, None, or_create)
     }
     pub fn info_ro_lock(&self, key: &Pubkey, or_create: bool) -> Result<Bind> {
         let (key, _) = self.pda.ro_lock_key(key);
-        self.info_pda(key, RoLock, None, or_create)
-    }
-    pub fn info_signer_info(&self, key: &Pubkey, or_create: bool) -> Result<Bind> {
-        let (key, _) = self.pda.signer_info_key(key);
-        self.info_pda(key, SignerInfo, None, or_create)
+        self.info_pda(&key, RoLock, None, or_create)
     }
     pub fn info_owner_reg(&self, or_create: bool) -> Result<Bind> {
         let (key, _) = self.pda.owner_info_key();
-        self.info_pda(key, OwnerInfo, None, or_create)
+        self.info_pda(&key, OwnerInfo, None, or_create)
     }
     pub fn info_pda(
         &self,
-        key: Pubkey,
+        key: &Pubkey,
         typ: AccountType,
         addr: Option<H160>,
         or_create: bool,
     ) -> Result<Bind> {
-        let mut bind = if let Some(bind) = self.load(&key, addr)? {
+        let mut bind = if let Some(bind) = self.load(key, addr)? {
             bind
         } else if or_create {
-            self.create_pda(&typ, key, addr)?
+            self.create_pda(&typ, *key, addr)?
         } else {
-            return Err(AccountNotFound(key, typ));
+            return Err(AccountNotFound(*key, typ));
         };
 
         let info = bind.into_account_info();
@@ -209,7 +206,7 @@ impl<'a> State<'a> {
             address,
         };
         let mut accounts = self.accounts.borrow_mut();
-        accounts.insert(bind.0, item);
+        assert!(accounts.insert(bind.0, item).is_none());
     }
 
     pub fn count_space(
@@ -254,6 +251,10 @@ impl<'a> State<'a> {
 
         let rent = Rent::get()?.minimum_balance(acc.data.len());
 
+        if rent > acc.lamports {
+            self.syscall.inc(); // transfer
+        }
+
         let _sys_acc = self
             .load(&system_program::ID, None)?
             .ok_or(SystemAccountNotFound(system_program::ID))?;
@@ -282,6 +283,7 @@ impl<'a> State<'a> {
             executable: false,
             rent_epoch: epoch.epoch,
         };
+        self.syscall.inc();
 
         let mut bind = (key, pda);
         {
@@ -345,11 +347,16 @@ impl<'a> State<'a> {
 
         Ok(())
     }
-    pub fn reset_counters(&self) {
+    pub fn reset(&self) {
         *self.alloc.borrow_mut() = 0;
         *self.dealloc.borrow_mut() = 0;
         *self.alloc_state.borrow_mut() = 0;
         *self.dealloc_state.borrow_mut() = 0;
+        *self.syscall.cnt.borrow_mut() = 0;
+        // clear cache
+        self.pda.balance.borrow_mut().clear();
+        self.pda.storage.borrow_mut().clear();
+        self.pda.ro_lock.borrow_mut().clear();
     }
 }
 

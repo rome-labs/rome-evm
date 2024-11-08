@@ -3,7 +3,9 @@ use {
         error::{Result, RomeProgramError::*},
         upgrade_authority, Data, OwnerInfo, State,
     },
-    solana_program::{account_info::AccountInfo, msg, pubkey::Pubkey},
+    solana_program::{
+        account_info::AccountInfo, clock::Clock, msg, pubkey::Pubkey, sysvar::Sysvar,
+    },
     std::{
         convert::{TryFrom, TryInto},
         mem::size_of,
@@ -41,9 +43,12 @@ pub fn check(info: &AccountInfo, signer: &Pubkey, chain: u64) -> Result<()> {
 pub fn reg(info: &AccountInfo, key: Pubkey, chain: u64) -> Result<()> {
     let mut owner_info = OwnerInfo::from_account_mut(info)?;
     let owner = owner_info.last_mut().unwrap();
+    let clock = Clock::get()?;
+
     owner.key = key;
     owner.chain = chain;
     owner.mint_address = None;
+    owner.slot = clock.slot;
 
     Ok(())
 }
