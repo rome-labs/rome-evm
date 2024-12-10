@@ -1,7 +1,11 @@
+use crate::tx::{rlp_at, rlp_header};
+use rlp::Rlp;
+use solana_program::keccak::hashv;
 use {
     super::{check_rlp, decode_to, fix, Base},
     evm::{H160, H256, U256},
 };
+
 #[derive(Debug, Clone, rlp::RlpEncodable, rlp::RlpDecodable, PartialEq)]
 pub struct AccessListItem {
     pub address: H160,
@@ -19,7 +23,8 @@ pub struct Eip2930 {
     pub gas_limit: U256,
     pub to: Option<H160>,
     pub value: U256,
-    pub data: Vec<u8>,
+    pub data: Option<Vec<u8>>,
+    #[allow(dead_code)]
     pub access_list: AccessList,
     pub recovery_id: u8,
     pub r: U256,
@@ -37,8 +42,8 @@ impl Base for Eip2930 {
     fn value(&self) -> U256 {
         self.value
     }
-    fn data(&self) -> &Vec<u8> {
-        &self.data
+    fn data(&mut self) -> Option<Vec<u8>> {
+        self.data.take()
     }
     fn gas_limit(&self) -> U256 {
         self.gas_limit
@@ -46,14 +51,11 @@ impl Base for Eip2930 {
     fn gas_price(&self) -> U256 {
         self.gas_price
     }
-    fn to_rlp(&self) -> Vec<u8> {
-        let rlp = rlp::encode(self);
+    fn hash_unsign(&self, rlp: &Rlp) -> crate::error::Result<H256> {
+        let rlp2 = rlp_at(rlp, 8)?;
+        let rlp1 = rlp_header(rlp2.len());
 
-        let mut prefixed = vec![];
-        prefixed.extend_from_slice(&[1]);
-        prefixed.extend_from_slice(rlp.as_ref());
-
-        prefixed
+        Ok(H256::from(hashv(&[&[1], &rlp1, rlp2]).to_bytes()))
     }
     fn rs(&self) -> (U256, U256) {
         (self.r, self.s)
@@ -76,9 +78,14 @@ impl Base for Eip2930 {
     }
 }
 impl Eip2930 {
+    pub fn rlp_at_chain_id(rlp: &rlp::Rlp) -> crate::error::Result<U256> {
+        let chain = fix(rlp, 0)?;
+        Ok(chain)
+    }
+
     pub fn from_rlp(rlp: &rlp::Rlp) -> crate::error::Result<Self> {
         check_rlp(rlp, 11)?;
-        let chain_id = fix(rlp, 0)?;
+        let chain_id = Eip2930::rlp_at_chain_id(rlp)?;
         let nonce: u64 = rlp.val_at(1)?;
         let gas_price = fix(rlp, 2)?;
         let gas_limit = fix(rlp, 3)?;
@@ -97,32 +104,12 @@ impl Eip2930 {
             gas_limit,
             to,
             value,
-            data,
+            data: Some(data),
             access_list,
             recovery_id,
             r,
             s,
             from: H160::default(),
         })
-    }
-}
-
-impl rlp::Encodable for Eip2930 {
-    fn rlp_append(&self, stream: &mut rlp::RlpStream) {
-        stream.begin_list(8);
-
-        stream.append(&self.chain_id);
-        stream.append(&self.nonce);
-        stream.append(&self.gas_price);
-        stream.append(&self.gas_limit);
-
-        match self.to.as_ref() {
-            Some(to) => stream.append(to),
-            None => stream.append(&""),
-        };
-
-        stream.append(&self.value);
-        stream.append(&self.data);
-        stream.append(&self.access_list);
     }
 }

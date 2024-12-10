@@ -9,75 +9,34 @@ use {
     std::collections::{BTreeMap, HashSet},
 };
 
-/// Journal entries that are used to track changes to the state and are used to revert it.
-// #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[allow(dead_code)]
-#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Clone)]
 pub enum Diff {
-    /// Used to mark account that is warm inside EVM in regards to EIP-2929 AccessList.
-    /// Action: We will add Account to state.
-    /// Revert: we will remove account from state.
-    // AccountLoaded { address: Address },
-    /// Mark account to be destroyed and journal balance to be reverted
-    /// Action: Mark account and transfer the balance
-    /// Revert: Unmark the account and transfer balance back
-    // AccountDestroyed {
-    //     address: Address,
-    //     target: Address,
-    //     was_destroyed: bool, // if account had already been destroyed before this journal entry
-    //     had_balance: U256,
-    // },
-    /// Loading account does not mean that account will need to be added to MerkleTree (touched).
-    /// Only when account is called (to execute contract or transfer balance) only then account is made touched.
-    /// Action: Mark account touched
-    /// Revert: Unmark account touched
-    // AccountTouched { address: Address },
-    /// Transfer balance between two accounts
-    /// Action: Transfer balance
-    /// Revert: Transfer balance back
     TransferFrom {
         balance: U256,
     },
     TransferTo {
         balance: U256,
     },
-    /// Increment nonce
-    /// Action: Increment nonce by one
-    /// Revert: Decrement nonce by one
     NonceChange,
-    /// Create account:
-    /// Actions: Mark account as created
-    /// Revert: Unmart account as created and reset nonce to zero.
-    // AccountCreated { address: H160 },
-    /// It is used to track both storage change and warm load of storage slot. For warm load in regard
-    /// to EIP-2929 AccessList had_value will be None
-    /// Action: Storage change or warm load
-    /// Revert: Revert to previous value or remove slot from storage
     StorageChange {
         key: U256,
         value: U256,
     },
-    /// It is used to track an EIP-1153 transient storage change.
-    /// Action: Transient storage changed.
-    /// Revert: Revert to previous value.
-    // TransientStorageChange {
-    //     key: U256,
-    //     had_value: U256,
-    // },
-    /// Code changed
-    /// Action: Account code changed
-    /// Revert: Revert to previous bytecode.
+    TStorageChange {
+        key: U256,
+        value: U256,
+    },
     CodeChange {
         code: Vec<u8>,
         valids: Vec<u8>,
     },
-    Suicide,
     Event {
         topics: Vec<H256>,
         data: Vec<u8>,
     },
 }
+/// Journal entries that are used to track changes to the state and are used to revert it.
 #[derive(Default)]
 pub struct Journal {
     pub diff: BTreeMap<H160, Vec<Diff>>,
@@ -185,6 +144,21 @@ impl Journal {
             .as_ref()
             .and_then(|parent| parent.storage_diff(address, index))
     }
+    pub fn t_storage_diff(&self, address: &H160, index: &U256) -> Option<U256> {
+        if let Some(items) = self.diff.get(address) {
+            for item in items.iter().rev() {
+                if let Diff::TStorageChange { key, value } = item {
+                    if key == index {
+                        return Some(*value);
+                    }
+                }
+            }
+        }
+
+        self.parent
+            .as_ref()
+            .and_then(|parent| parent.t_storage_diff(address, index))
+    }
 
     pub fn depth(&self) -> usize {
         let depth = if let Some(parent) = self.parent.as_ref() {
@@ -244,9 +218,6 @@ impl Journal {
                     Diff::StorageChange { key, value } => {
                         state.set_storage(address, key, value, context)?;
                     }
-                    Diff::Suicide => {
-                        todo!()
-                    }
                     Diff::Event { topics, data } => {
                         msg!("SetLogs");
                         state.set_logs(address, topics, data)?;
@@ -258,7 +229,10 @@ impl Journal {
                     Diff::TransferTo { balance } => {
                         msg!("TransferTo");
                         state.add_balance(address, balance, context)?;
-                    }
+                    },
+                    Diff::TStorageChange {..} => {
+                        msg!("TStorageChange");
+                    },
                 }
             }
         }
@@ -356,5 +330,25 @@ impl Journal {
         });
 
         Ok(new)
+    }
+
+    pub fn selfdestruct(&mut self, address: &H160) {
+        if let Some(parent) = self.parent.as_mut() {
+            parent.selfdestruct(address)
+        }
+
+        if let Some(diffs)  = self.diff.get_mut(address) {
+            *diffs  = diffs
+                .iter()
+                .filter(|a|
+                    match a {
+                        Diff::TransferFrom { balance: _ } | Diff::TransferTo { balance: _ } => {
+                            true
+                        }
+                        _ => false
+                    })
+                .cloned()
+                .collect::<Vec<_>>();
+        }
     }
 }

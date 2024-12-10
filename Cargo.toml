@@ -11,7 +11,6 @@ resolver = "2"
 
 [workspace.dependencies]
 thiserror = "1.0.58"
-anyhow = "1.0.86"
 # solana
 solana-client = "1.18.17"
 solana-sdk = "1.18.17"

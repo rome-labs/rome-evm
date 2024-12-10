@@ -34,14 +34,14 @@ pub fn do_tx_holder_iterative<'a>(
     let (session, holder, hash, chain, fee_addr, lock_overrides) = args(data)?;
     let state = State::new(program_id, accounts, chain)?;
     let info = state.info_tx_holder(holder, false)?;
-    let tx = Holder::tx(info, hash, chain)?;
+    let rlp = Holder::rlp(info, hash, chain)?;
 
     let context = ContextIterative::new(
         &state,
         accounts,
         holder,
         lock_overrides,
-        tx,
+        &rlp,
         hash,
         session,
         fee_addr,

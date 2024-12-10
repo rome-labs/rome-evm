@@ -1,4 +1,3 @@
-use rome_evm::StateHolder;
 use {
     super::iterative_lock::iterative_lock,
     crate::{state::State, LockOverrides},
@@ -10,10 +9,9 @@ use {
         },
         error::Result,
         state::{origin::Origin, Allocate},
-        tx::Base,
         tx::{legacy::Legacy, tx::Tx},
         vm::{vm_iterative::MachineIterative, Vm},
-        Iterations, H160, H256,
+        Iterations, H160, H256, StateHolder,
     },
     solana_program::{
         account_info::{AccountInfo, IntoAccountInfo},
@@ -27,19 +25,18 @@ pub struct ContextEstimateGas<'a, 'b> {
     pub state: &'b State<'a>,
     pub holder: u64,
     pub tx_hash: H256,
-    pub tx: Tx,
+    pub legacy: Legacy,
     pub lock_overrides: RefCell<Vec<Pubkey>>,
     pub session: u64,
 }
 impl<'a, 'b> ContextEstimateGas<'a, 'b> {
     pub fn new(state: &'b State<'a>, legacy: Legacy) -> Result<Self> {
-        let hash = H256::from(keccak::hash(&legacy.to_rlp()).to_bytes());
+        let hash = H256::from(keccak::hash(&[1, 2 ,3]).to_bytes());
         let holder = 0;
         let _state_holder = state.info_state_holder(holder, true)?;
-        let tx = Tx::from_legacy(legacy);
         Ok(Self {
             state,
-            tx,
+            legacy,
             tx_hash: hash,
             holder,
             lock_overrides: RefCell::new(vec![]),
@@ -49,8 +46,8 @@ impl<'a, 'b> ContextEstimateGas<'a, 'b> {
 }
 
 impl<'a, 'b> Context for ContextEstimateGas<'a, 'b> {
-    fn tx(&self) -> &Tx {
-        &self.tx
+    fn tx(&self) -> Result<Tx> {
+        Ok(Tx::from_legacy(self.legacy.clone()))
     }
     fn save_iteration(&self, iteration: Iterations) -> Result<()> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;

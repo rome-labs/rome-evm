@@ -6,7 +6,7 @@ pub mod tx;
 
 use {
     crate::error::{Result, RomeProgramError::*},
-    evm::{H160, U256},
+    evm::{H160, H256, U256},
     legacy::Legacy,
     rlp::{DecoderError, Rlp},
 };
@@ -15,10 +15,10 @@ pub trait Base {
     fn nonce(&self) -> u64;
     fn to(&self) -> Option<H160>;
     fn value(&self) -> U256;
-    fn data(&self) -> &Vec<u8>;
+    fn data(&mut self) -> Option<Vec<u8>>;
     fn gas_limit(&self) -> U256;
     fn gas_price(&self) -> U256;
-    fn to_rlp(&self) -> Vec<u8>;
+    fn hash_unsign(&self, rlp: &Rlp) -> Result<H256>;
     fn rs(&self) -> (U256, U256);
     fn recovery_id(&self) -> Result<u8>;
     fn chain_id(&self) -> u64;
@@ -81,4 +81,26 @@ fn check_rlp(rlp: &Rlp, count: usize) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn rlp_at<'a>(rlp: &'a Rlp, ix: usize) -> Result<&'a [u8]> {
+    let bin = rlp.as_raw();
+    let from = rlp.payload_info()?.header_len;
+    let (_, to) = rlp.at_with_offset(ix)?;
+    Ok(&bin[from..to])
+}
+
+fn rlp_header(len: usize) -> Vec<u8> {
+    let mut rlp = vec![];
+
+    if len < 55 {
+        rlp.push(0xc0 + len as u8)
+    } else {
+        let zeros = len.leading_zeros() as usize;
+        let mut len_be = len.to_be_bytes()[zeros / 8..].to_vec();
+        rlp.push(0xf7 + len_be.len() as u8);
+        rlp.append(&mut len_be);
+    }
+
+    rlp
 }

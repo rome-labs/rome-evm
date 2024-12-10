@@ -1,8 +1,8 @@
 use {
     crate::{
         error::Result, state::Syscall, upgrade_authority, AccountState, AccountType, Data,
-        OwnerInfo, RoLock, StateHolder, Storage, TxHolder, ACCOUNT_SEED, OWNER_INFO,
-        RO_LOCK_SEED, STATE_HOLDER_SEED, STORAGE_LEN, TX_HOLDER_SEED,
+        OwnerInfo, RoLock, StateHolder, Storage, TxHolder, ACCOUNT_SEED, OWNER_INFO, RO_LOCK_SEED,
+        STATE_HOLDER_SEED, STORAGE_LEN, TX_HOLDER_SEED,
     },
     borsh::{BorshDeserialize, BorshSerialize},
     evm::{H160, U256},

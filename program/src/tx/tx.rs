@@ -4,24 +4,45 @@ use {
         error::{Result, RomeProgramError::*},
         tx::{eip1559::Eip1559, eip2930::Eip2930},
     },
-    evm::{H160, U256},
+    evm::H160,
     rlp::Rlp,
     solana_program::{keccak::hash, msg, secp256k1_recover::secp256k1_recover},
+    std::ops::{Deref, DerefMut},
 };
+
+enum TxType<'a> {
+    Legacy(Rlp<'a>),
+    Eip2930(Rlp<'a>),
+    Eip1559(Rlp<'a>),
+}
 
 pub struct Tx {
     tx: Box<dyn Base>,
 }
+
+impl Deref for Tx {
+    type Target = Box<dyn Base>;
+    fn deref(&self) -> &Self::Target {
+        &self.tx
+    }
+}
+impl DerefMut for Tx {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.tx
+    }
+}
+
 impl Tx {
+    #[cfg(not(target_os = "solana"))]
     pub fn from_legacy(tx: Legacy) -> Self {
         Self { tx: Box::new(tx) }
     }
-    pub fn from_instruction(data: &[u8]) -> Result<Self> {
+
+    fn tx_type(data: &[u8]) -> Result<TxType> {
         let rlp = Rlp::new(data);
 
-        let mut tx: Box<dyn Base> = if rlp.is_list() {
-            let legacy = Legacy::from_rlp(&rlp)?;
-            Box::new(legacy)
+        if rlp.is_list() {
+            Ok(TxType::Legacy(rlp))
         } else {
             // if it is not wrapped then we need to use rlp.as_raw instead of rlp.data
             let first_byte = *rlp
@@ -40,25 +61,50 @@ impl Tx {
             let bytes = data.get(1..).ok_or(Custom("RLP: no tx body".to_string()))?;
             let rlp = Rlp::new(bytes);
             match first {
-                0x01 => {
-                    let eip2930 = Eip2930::from_rlp(&rlp)?;
-                    Box::new(eip2930)
-                }
-                0x02 => {
-                    let eip1559 = Eip1559::from_rlp(&rlp)?;
-                    Box::new(eip1559)
-                }
-                _ => return Err(Custom(format!("RLP: invalid tx type {first}"))),
+                0x01 => Ok(TxType::Eip2930(rlp)),
+                0x02 => Ok(TxType::Eip1559(rlp)),
+                _ => Err(Custom(format!("RLP: invalid tx type {first}"))),
+            }
+        }
+    }
+
+    pub fn from_instruction(data: &[u8]) -> Result<Self> {
+        let tx_type = Tx::tx_type(data)?;
+
+        let (mut tx, rlp): (Box<dyn Base>, Rlp) = match tx_type {
+            TxType::Legacy(rlp) => {
+                let legacy = Legacy::from_rlp(&rlp)?;
+                (Box::new(legacy), rlp)
+            }
+            TxType::Eip2930(rlp) => {
+                let eip2930 = Eip2930::from_rlp(&rlp)?;
+                (Box::new(eip2930), rlp)
+            }
+            TxType::Eip1559(rlp) => {
+                let eip1559 = Eip1559::from_rlp(&rlp)?;
+                (Box::new(eip1559), rlp)
             }
         };
 
-        let from = Tx::recovery_from(&*tx)?;
+        let from = Tx::recovery_from(&*tx, &rlp)?;
         tx.set_from(from);
 
         Ok(Self { tx })
     }
 
-    fn recovery_from(tx: &dyn Base) -> Result<H160> {
+    pub fn chain_id_from_rlp(data: &[u8]) -> Result<u64> {
+        let tx_type = Tx::tx_type(data)?;
+
+        let chain = match tx_type {
+            TxType::Legacy(rlp) => Legacy::rlp_at_chain_id(&rlp)?,
+            TxType::Eip2930(rlp) => Eip2930::rlp_at_chain_id(&rlp)?,
+            TxType::Eip1559(rlp) => Eip1559::rlp_at_chain_id(&rlp)?,
+        };
+
+        Ok(chain.as_u64())
+    }
+
+    fn recovery_from(tx: &dyn Base, rlp: &Rlp) -> Result<H160> {
         let mut rs = [0_u8; 64];
 
         let (r, s) = tx.rs();
@@ -66,10 +112,9 @@ impl Tx {
         s.to_big_endian(&mut rs[32..64]);
 
         let recovery_id = tx.recovery_id()?;
+        let hash = tx.hash_unsign(rlp)?;
 
-        let rlp = tx.to_rlp();
-        let hash = hash(&rlp).to_bytes().to_vec();
-        let pub_key = Tx::syscall(&hash, recovery_id, &rs)?;
+        let pub_key = Tx::syscall(hash.as_bytes(), recovery_id, &rs)?;
         let from = H160::from_slice(&pub_key[12..]);
 
         Ok(from)
@@ -84,36 +129,12 @@ impl Tx {
         Ok(pub_key)
     }
 
-    pub fn nonce(&self) -> u64 {
-        self.tx.nonce()
-    }
-    pub fn to(&self) -> Option<H160> {
-        self.tx.to()
-    }
-    pub fn value(&self) -> U256 {
-        self.tx.value()
-    }
-    pub fn data(&self) -> &Vec<u8> {
-        self.tx.data()
-    }
-    pub fn from(&self) -> H160 {
-        self.tx.from()
-    }
-    pub fn gas_limit(&self) -> U256 {
-        self.tx.gas_limit()
-    }
-    pub fn gas_price(&self) -> U256 {
-        self.tx.gas_price()
-    }
-    pub fn chain_id(&self) -> u64 {
-        self.tx.chain_id()
-    }
     #[cfg(test)]
     fn access_list(&self) -> Option<&super::eip2930::AccessList> {
         self.tx.access_list()
     }
     #[cfg(test)]
-    fn vrs(&self) -> (u8, U256, U256) {
+    fn vrs(&self) -> (u8, evm::U256, evm::U256) {
         let recovery_id = self.tx.recovery_id().unwrap();
         let (r, s) = self.tx.rs();
         (recovery_id, r, s)
@@ -133,7 +154,7 @@ mod tests {
     #[test]
     fn eip2930_without_access_list() {
         let raw_tx = hex::decode("01f901ef018209068508d8f9fc0083124f8094f5b4f13bdbe12709bd3ea280ebf4b936e99b20f280b90184c5d404940000000000000000000000000000000000000000000000000c4d67a76e15d8190000000000000000000000000000000000000000000000000029d9d8fb7440000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000020000000000000000000000007b73644935b8e68019ac6356c40661e1bc315860000000000000000000000000761d38e5ddf6ccf6cf7c55759d5210750b5d60f30000000000000000000000000000000000000000000000000000000000000000000000000000000000000000381fe4eb128db1621647ca00965da3f9e09f4fac000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000000000000000000000000000000000000000000ac001a0881e7f5298290794bcaa0294986db5c375cbf135dd3c21456b159c470568b687a061fc5f52abab723053fbedf29e1c60b89006416d6c86e1c54ef85a3e84f2dc6e").unwrap();
-        let tx = Tx::from_instruction(&raw_tx).unwrap();
+        let mut tx = Tx::from_instruction(&raw_tx).unwrap();
         let from = hex::decode("82a33964706683db62b85a59128ce2fc07c91658").unwrap();
         let to = hex::decode("f5b4f13bdbe12709bd3ea280ebf4b936e99b20f2").unwrap();
         let data = hex::decode("c5d404940000000000000000000000000000000000000000000000000c4d67a76e15d8190000000000000000000000000000000000000000000000000029d9d8fb7440000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000020000000000000000000000007b73644935b8e68019ac6356c40661e1bc315860000000000000000000000000761d38e5ddf6ccf6cf7c55759d5210750b5d60f30000000000000000000000000000000000000000000000000000000000000000000000000000000000000000381fe4eb128db1621647ca00965da3f9e09f4fac000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000000000000000000000000000000000000000000a")
@@ -154,7 +175,7 @@ mod tests {
         assert_eq!(tx.gas_limit(), 1_200_000_u64.into());
         assert_eq!(tx.gas_price(), 38_000_000_000_u64.into());
         assert_eq!(tx.value(), 0_u64.into());
-        assert_eq!(tx.data(), &data);
+        assert_eq!(tx.data().as_ref().unwrap(), &data);
         assert_eq!(tx.access_list().unwrap().0.len(), 0);
         assert_eq!(tx.vrs(), (1_u8, r, s));
     }
@@ -162,7 +183,7 @@ mod tests {
     #[test]
     fn eip2930_with_access_list() {
         let raw_tx = hex::decode("01f90126018223ff850a02ffee00830f4240940000000000a8fb09af944ab3baf7a9b3e1ab29d880b876200200001525000000000b69ffb300000000557b933a7c2c45672b610f8954a3deb39a51a8cae53ec727dbdeb9e2d5456c3be40cff031ab40a55724d5c9c618a2152e99a45649a3b8cf198321f46720b722f4ec38f99ba3bb1303258d2e816e6a95b25647e01bd0967c1b9599fa3521939871d1d0888f845d694724d5c9c618a2152e99a45649a3b8cf198321f46c0d694720b722f4ec38f99ba3bb1303258d2e816e6a95bc0d69425647e01bd0967c1b9599fa3521939871d1d0888c001a08323efae7b9993bd31a58da7924359d24b5504aa2b33194fcc5ae206e65d2e62a054ce201e3b4b5cd38eb17c56ee2f9111b2e164efcd57b3e70fa308a0a51f7014").unwrap();
-        let tx = Tx::from_instruction(&raw_tx).unwrap();
+        let mut tx = Tx::from_instruction(&raw_tx).unwrap();
         let from = hex::decode("e9c790e8fde820ded558a4771b72eec916c04763").unwrap();
         let to = hex::decode("0000000000a8fb09af944ab3baf7a9b3e1ab29d8").unwrap();
         let data = hex::decode("200200001525000000000b69ffb300000000557b933a7c2c45672b610f8954a3deb39a51a8cae53ec727dbdeb9e2d5456c3be40cff031ab40a55724d5c9c618a2152e99a45649a3b8cf198321f46720b722f4ec38f99ba3bb1303258d2e816e6a95b25647e01bd0967c1b9599fa3521939871d1d0888")
@@ -200,7 +221,7 @@ mod tests {
         assert_eq!(tx.gas_limit(), 1_000_000_u64.into());
         assert_eq!(tx.gas_price(), 43_000_000_000_u64.into());
         assert_eq!(tx.value(), 0_u64.into());
-        assert_eq!(tx.data(), &data);
+        assert_eq!(tx.data().as_ref().unwrap(), &data);
         assert_eq!(tx.access_list().unwrap(), &access_list);
         assert_eq!(tx.vrs(), (1_u8, r, s));
     }

@@ -1,3 +1,4 @@
+
 use {
     crate::{
         context::ContextAtomic,
@@ -18,9 +19,9 @@ pub fn do_tx<'a>(
     msg!("Instruction: Atomic transaction");
 
     let (fee_addr, rlp) = split_fee(data)?;
-    let tx = Tx::from_instruction(rlp)?;
-    let state = State::new(program_id, accounts, tx.chain_id())?;
-    let context = ContextAtomic::new(&state, tx, fee_addr);
+    let chain = Tx::chain_id_from_rlp(rlp)?;
+    let state = State::new(program_id, accounts, chain)?;
+    let context = ContextAtomic::new(&state, rlp, fee_addr);
     let mut vm = Vm::new_atomic(&state, &context)?;
     vm.consume(MachineAtomic::Lock)
 }

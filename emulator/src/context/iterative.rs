@@ -20,21 +20,21 @@ use {
 pub struct ContextIterative<'a, 'b> {
     pub state: &'b State<'a>,
     pub holder: u64,
-    pub tx: &'b Tx,
     pub tx_hash: H256,
     pub lock_overrides: RefCell<Vec<Pubkey>>,
     pub session: u64,
     pub fee_addr: Option<H160>,
+    pub rlp: &'b [u8],
 }
 
 impl<'a, 'b> ContextIterative<'a, 'b> {
     pub fn new(
         state: &'b State<'a>,
         holder: u64,
-        tx: &'b Tx,
         tx_hash: H256,
         session: u64,
         fee_addr: Option<H160>,
+        rlp: &'b[u8],
     ) -> Result<Self> {
         // allocation affects the vm behaviour.
         // it is important to allocate state_holder before the starting the vm
@@ -44,18 +44,18 @@ impl<'a, 'b> ContextIterative<'a, 'b> {
         Ok(Self {
             state,
             holder,
-            tx,
             tx_hash,
             lock_overrides: RefCell::new(vec![]),
             session,
             fee_addr,
+            rlp
         })
     }
 }
 
 impl<'a, 'b> Context for ContextIterative<'a, 'b> {
-    fn tx(&self) -> &Tx {
-        self.tx
+    fn tx(&self) -> Result<Tx> {
+        Tx::from_instruction(self.rlp)
     }
     fn save_iteration(&self, iteration: Iterations) -> Result<()> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;

@@ -36,7 +36,7 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         true
     }
 
-    pub fn call_from_tx(&self, tx: &Tx) -> Result<CallInterrupt> {
+    pub fn call_from_tx(&self, tx: &mut Tx) -> Result<CallInterrupt> {
         let to = tx.to().unwrap();
         let context = evm::Context {
             address: to,
@@ -57,13 +57,13 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         Ok(CallInterrupt {
             code_address: to,
             transfer,
-            input: tx.data().clone(),
+            input: tx.data().unwrap(),
             is_static: false,
             context,
         })
     }
 
-    pub fn create_from_tx(&self, tx: &Tx) -> Result<CreateInterrupt> {
+    pub fn create_from_tx(&self, tx: &mut Tx) -> Result<CreateInterrupt> {
         let address_scheme = evm::CreateScheme::Legacy { caller: tx.from() };
         let to = self.handler.build_address(address_scheme)?;
         let context = evm::Context {
@@ -86,7 +86,7 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
             context,
             address: to,
             transfer,
-            init_code: tx.data().clone(),
+            init_code: tx.data().unwrap(),
         })
     }
 
@@ -144,7 +144,7 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
     }
 
     pub fn snapshot_from_tx(&mut self) -> Result<Box<Snapshot>> {
-        let tx = self.context.tx();
+        let mut tx = self.context.tx()?;
         let from = tx.from();
         msg!("from {}", &hex::encode(from));
 
@@ -157,10 +157,10 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         }
 
         let snapshot = if tx.to().is_some() {
-            let call = self.call_from_tx(tx)?;
+            let call = self.call_from_tx(&mut tx)?;
             self.call_snapshot(call)?
         } else {
-            let create = self.create_from_tx(tx)?;
+            let create = self.create_from_tx(&mut tx)?;
             self.create_snapshot(create)?
         };
 
@@ -219,21 +219,10 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         reason: ExitReason,
         address: H160,
     ) -> Option<(Vec<u8>, ExitReason)> {
-        let mut reason = reason;
-
         if reason.is_succeed() {
-            let limit = evm::CONFIG
-                .create_contract_limit
-                .unwrap_or(u32::MAX as usize);
-
-            if snapshot.evm.machine().return_value_len() > limit {
-                self.handler.revert_diff(); // todo: check impl
-                reason = ExitReason::Error(evm::ExitError::CreateContractLimit)
-            } else {
-                let return_value = snapshot.evm.machine().return_value();
-                // TODO: static flag ?
-                self.handler.set_code(address, return_value);
-            }
+            let return_value = snapshot.evm.machine().return_value();
+            // TODO: static flag ?
+            self.handler.set_code(address, return_value);
         }
 
         let snapshot = if let Some(snapshot) = self.snapshot.as_mut() {

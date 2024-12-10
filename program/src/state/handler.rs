@@ -170,7 +170,19 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
 
         self.transfer(&address, &target, &value)
             .map_err(|_| ExitError::OutOfFund)?;
-        self.journal.get_mut(&address).push(Diff::Suicide);
+
+        if !self.code_size(address).is_zero() {
+            let onchain_code_size = if precompiled_contract(address) {
+                1
+            } else {
+                self.state.code(&address).map_or(0, |vec| vec.len())
+            };
+
+            if onchain_code_size == 0  {
+                self.journal.selfdestruct(&address)
+            }
+        }
+
         Ok(())
     }
 
@@ -278,16 +290,36 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
     fn call_feedback(
         &mut self,
         _feedback: Self::CallFeedback,
-    ) -> std::result::Result<(), ExitError> {
+    ) -> Result<(), ExitError> {
         Ok(())
     }
 
     /// Handle other unknown external opcodes.
     fn other(
         &mut self,
-        _opcode: Opcode,
+        opcode: Opcode,
         _stack: &mut Machine,
-    ) -> std::result::Result<(), ExitError> {
-        Err(ExitError::IncompatibleVersionEVM)
+    ) -> Result<(), ExitError> {
+        Err(ExitError::IncompatibleVersionEVM(opcode.0))
     }
+
+    fn transient_storage(&self, address: H160, index: U256) -> U256 {
+        if let Some(value) = self.journal.t_storage_diff(&address, &index) {
+            return value;
+        }
+
+        U256::zero()
+    }
+
+    fn set_transient_storage(&mut self, address: H160, index: U256, value: U256) -> Result<(), ExitError> {
+        if !self.mutable {
+            return Err(ExitError::StaticModeViolation);
+        }
+
+        self.journal
+            .get_mut(&address)
+            .push(Diff::TStorageChange { key: index, value });
+        Ok(())
+    }
+
 }

@@ -18,7 +18,7 @@ use {
 };
 
 pub trait Context {
-    fn tx(&self) -> &Tx;
+    fn tx(&self) -> Result<Tx>;
     fn save_iteration(&self, iteration: Iterations) -> Result<()>;
     fn restore_iteration(&self) -> Result<Iterations>;
     fn serialize<T: Origin + Allocate, L: AccountLock + Context>(

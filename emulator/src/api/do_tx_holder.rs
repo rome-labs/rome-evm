@@ -20,7 +20,7 @@ pub fn do_tx_holder<'a>(
 
     let mut bind = state.info_tx_holder(holder, false)?;
     let info = bind.into_account_info();
-    let tx = Holder::tx(&info, hash, chain)?;
+    let rlp = Holder::rlp(&info, hash, chain)?;
 
-    atomic_transaction(state, tx, fee_addr)
+    atomic_transaction(state, &rlp, fee_addr)
 }

@@ -22,13 +22,13 @@ pub fn do_tx<'a>(
 ) -> Result<Emulation> {
     msg!("Instruction: Atomic transaction");
     let (fee_addr, rlp) = split_fee(data)?;
-    let tx = Tx::from_instruction(rlp)?;
-    let state = State::new(program_id, Some(*signer), client, tx.chain_id())?;
-    atomic_transaction(state, tx, fee_addr)
+    let chain = Tx::chain_id_from_rlp(rlp)?;
+    let state = State::new(program_id, Some(*signer), client, chain)?;
+    atomic_transaction(state, rlp, fee_addr)
 }
 
-pub fn atomic_transaction(state: State, tx: Tx, fee_addr: Option<H160>) -> Result<Emulation> {
-    let context = ContextAtomic::new(&state, tx, fee_addr);
+pub fn atomic_transaction(state: State, rlp: &[u8], fee_addr: Option<H160>) -> Result<Emulation> {
+    let context = ContextAtomic::new(&state, rlp, fee_addr);
     let mut vm = vm::Vm::new_atomic(&state, &context)?;
     vm.consume(MachineAtomic::Lock)?;
 

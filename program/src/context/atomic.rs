@@ -13,22 +13,22 @@ use {
 
 pub struct ContextAtomic<'a, 'b> {
     pub state: &'b State<'a>,
-    pub tx: Tx,
+    pub rlp: &'b [u8],
     pub fee_addr: Option<H160>,
 }
 impl<'a, 'b> ContextAtomic<'a, 'b> {
-    pub fn new(state: &'b State<'a>, tx: Tx, fee_addr: Option<H160>) -> Self {
+    pub fn new(state: &'b State<'a>, rlp: &'b [u8], fee_addr: Option<H160>) -> Self {
         Self {
             state,
-            tx,
+            rlp,
             fee_addr,
         }
     }
 }
 
 impl<'a, 'b> Context for ContextAtomic<'a, 'b> {
-    fn tx(&self) -> &Tx {
-        &self.tx
+    fn tx(&self) -> Result<Tx> {
+        Tx::from_instruction(self.rlp)
     }
     fn save_iteration(&self, _: Iterations) -> Result<()> {
         unreachable!()

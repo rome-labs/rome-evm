@@ -1,13 +1,13 @@
 use {
     super::{do_tx_iterative::iterative_tx, Emulation},
-    crate::{context::ContextIterative, state::State},
+    crate::{context::ContextIterative, state::State,},
     rome_evm::{
         api::{split_fee, split_hash, split_u64},
         error::Result,
-        Holder, H160, H256,
+        H160, H256, Holder,
     },
     solana_client::rpc_client::RpcClient,
-    solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey},
+    solana_program::{msg, pubkey::Pubkey, account_info::IntoAccountInfo},
     std::sync::Arc,
 };
 
@@ -35,8 +35,8 @@ pub fn do_tx_holder_iterative<'a>(
 
     let mut bind = state.info_tx_holder(holder, false)?;
     let info = bind.into_account_info();
-    let tx = Holder::tx(&info, hash, chain)?;
+    let rlp = Holder::rlp(&info, hash, chain)?;
 
-    let context = ContextIterative::new(&state, holder, &tx, hash, session, fee_addr)?;
+    let context = ContextIterative::new(&state, holder, hash, session, fee_addr, &rlp)?;
     iterative_tx(&state, context)
 }

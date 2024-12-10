@@ -13,15 +13,16 @@ use {
 pub struct Holder {}
 
 impl Holder {
-    pub fn tx(info: &AccountInfo, hash: H256, chain: u64) -> Result<Tx> {
+    pub fn rlp<'a>(info: &'a AccountInfo, hash: H256, chain: u64) -> Result<Ref<'a, [u8]>> {
         let holder = TxHolder::from_account(info)?;
         holder.check_hash(info, hash)?;
         let rlp = Holder::from_account(info)?;
-        let tx = Tx::from_instruction(&rlp)?;
-        if tx.chain_id() == chain {
-            Ok(tx)
+        let rpl_chain_id = Tx::chain_id_from_rlp(&rlp)?;
+
+        if rpl_chain_id == chain {
+            Ok(rlp)
         } else {
-            Err(IncorrectChainId(Some((tx.chain_id(), chain))))
+            Err(IncorrectChainId(Some((rpl_chain_id, chain))))
         }
     }
 

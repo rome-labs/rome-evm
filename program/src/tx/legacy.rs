@@ -1,7 +1,9 @@
 use {
-    super::{check_rlp, decode_to, fix, Base},
+    super::{check_rlp, decode_to, fix, rlp_at, rlp_header, Base},
     crate::error::{Result, RomeProgramError::*},
-    evm::{H160, U256},
+    evm::{H160, H256, U256},
+    rlp::{Rlp, RlpStream},
+    solana_program::keccak::hashv,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -11,7 +13,7 @@ pub struct Legacy {
     pub gas_limit: U256,
     pub to: Option<H160>,
     pub value: U256,
-    pub data: Vec<u8>,
+    pub data: Option<Vec<u8>>,
     pub v: U256,
     pub r: U256,
     pub s: U256,
@@ -29,8 +31,8 @@ impl Base for Legacy {
     fn value(&self) -> U256 {
         self.value
     }
-    fn data(&self) -> &Vec<u8> {
-        &self.data
+    fn data(&mut self) -> Option<Vec<u8>> {
+        self.data.take()
     }
     fn gas_limit(&self) -> U256 {
         self.gas_limit
@@ -38,8 +40,18 @@ impl Base for Legacy {
     fn gas_price(&self) -> U256 {
         self.gas_price
     }
-    fn to_rlp(&self) -> Vec<u8> {
-        rlp::encode(self).to_vec()
+    fn hash_unsign(&self, rlp: &Rlp) -> Result<H256> {
+        let rlp2 = rlp_at(rlp, 6)?;
+
+        let mut stream = RlpStream::new();
+        stream.append(&self.chain_id);
+        stream.append(&"");
+        stream.append(&"");
+        let rlp3 = stream.as_raw();
+
+        let rlp1 = rlp_header(rlp2.len() + rlp3.len());
+
+        Ok(H256::from(hashv(&[&rlp1, rlp2, rlp3]).to_bytes()))
     }
     fn rs(&self) -> (U256, U256) {
         (self.r, self.s)
@@ -73,6 +85,18 @@ impl Base for Legacy {
 }
 
 impl Legacy {
+    pub fn rlp_at_chain_id(rlp: &rlp::Rlp) -> Result<U256> {
+        let v = fix(rlp, 6)?;
+
+        if v >= 35.into() {
+            Ok((v - 1) / 2 - 17)
+        } else if v == 27.into() || v == 28.into() {
+            Err(IncorrectChainId(None))
+        } else {
+            Err(Custom("incorrect tx.v".to_string()))
+        }
+    }
+
     pub fn from_rlp(rlp: &rlp::Rlp) -> Result<Self> {
         check_rlp(rlp, 9)?;
         let nonce: u64 = rlp.val_at(0)?;
@@ -85,13 +109,7 @@ impl Legacy {
         let r = fix(rlp, 7)?;
         let s = fix(rlp, 8)?;
 
-        let chain_id = if v >= 35.into() {
-            (v - 1) / 2 - 17
-        } else if v == 27.into() || v == 28.into() {
-            return Err(IncorrectChainId(None));
-        } else {
-            return Err(Custom("incorrect tx.v".to_string()));
-        };
+        let chain_id = Legacy::rlp_at_chain_id(rlp)?;
 
         Ok(Legacy {
             nonce,
@@ -99,34 +117,12 @@ impl Legacy {
             gas_limit,
             to,
             value,
-            data,
+            data: Some(data),
             v,
             r,
             s,
             chain_id,
             from: H160::default(),
         })
-    }
-}
-
-impl rlp::Encodable for Legacy {
-    fn rlp_append(&self, stream: &mut rlp::RlpStream) {
-        stream.begin_list(9);
-
-        stream.append(&self.nonce);
-        stream.append(&self.gas_price);
-        stream.append(&self.gas_limit);
-
-        match self.to.as_ref() {
-            Some(to) => stream.append(to),
-            None => stream.append(&""),
-        };
-
-        stream.append(&self.value);
-        stream.append(&self.data);
-
-        stream.append(&self.chain_id);
-        stream.append(&"");
-        stream.append(&"");
     }
 }

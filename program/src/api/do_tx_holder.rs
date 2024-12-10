@@ -32,8 +32,8 @@ pub fn do_tx_holder<'a>(
     let state = State::new(program_id, accounts, chain)?;
 
     let info = state.info_tx_holder(holder, false)?;
-    let tx = Holder::tx(info, hash, chain)?;
-    let context = ContextAtomic::new(&state, tx, fee_addr);
+    let rlp = Holder::rlp(info, hash, chain)?;
+    let context = ContextAtomic::new(&state, &rlp, fee_addr);
 
     let mut vm = Vm::new_atomic(&state, &context)?;
     vm.consume(MachineAtomic::Lock)

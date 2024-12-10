@@ -20,7 +20,7 @@ pub struct ContextIterative<'a, 'b> {
     pub lock_overrides: &'a [u8],
     pub state_holder: &'a AccountInfo<'a>,
     pub tx_hash: H256,
-    pub tx: Tx,
+    pub rlp: &'b [u8],
     pub session: u64,
     pub fee_addr: Option<H160>,
 }
@@ -32,7 +32,7 @@ impl<'a, 'b> ContextIterative<'a, 'b> {
         accounts: &'a [AccountInfo<'a>],
         holder: u64,
         lock_overrides: &'a [u8],
-        tx: Tx,
+        rlp: &'b [u8],
         tx_hash: H256,
         session: u64,
         fee_addr: Option<H160>,
@@ -45,7 +45,7 @@ impl<'a, 'b> ContextIterative<'a, 'b> {
             lock_overrides,
             state_holder,
             tx_hash,
-            tx,
+            rlp,
             session,
             fee_addr,
         })
@@ -53,8 +53,8 @@ impl<'a, 'b> ContextIterative<'a, 'b> {
 }
 
 impl<'a, 'b> Context for ContextIterative<'a, 'b> {
-    fn tx(&self) -> &Tx {
-        &self.tx
+    fn tx(&self) -> Result<Tx> {
+        Tx::from_instruction(self.rlp)
     }
 
     fn save_iteration(&self, iteration: Iterations) -> Result<()> {

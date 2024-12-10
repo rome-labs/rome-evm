@@ -4,7 +4,7 @@ use {
         context::{account_lock::AccountLock, Context},
         error::Result,
         state::{origin::Origin, Allocate},
-        tx::tx::Tx,
+        tx::{tx::Tx, legacy::Legacy},
         vm::{vm_iterative::MachineIterative, Vm},
         H160, H256,
     },
@@ -12,17 +12,19 @@ use {
 };
 
 pub struct ContextEthCall {
-    pub tx: Tx,
+    pub legacy: Legacy,
 }
 impl ContextEthCall {
-    pub fn new(tx: Tx) -> Self {
-        Self { tx }
+    pub fn new(legacy: Legacy) -> Self {
+        Self {
+            legacy,
+        }
     }
 }
 
 impl Context for ContextEthCall {
-    fn tx(&self) -> &Tx {
-        &self.tx
+    fn tx(&self) -> Result<Tx> {
+        Ok(Tx::from_legacy(self.legacy.clone()))
     }
     fn save_iteration(&self, _: Iterations) -> Result<()> {
         unreachable!()

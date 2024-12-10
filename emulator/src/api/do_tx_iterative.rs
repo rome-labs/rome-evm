@@ -89,17 +89,16 @@ pub fn do_tx_iterative<'a>(
     client: Arc<RpcClient>,
 ) -> Result<Emulation> {
     msg!("Instruction: Iterative transaction");
-
-    let (session, holder, fee_addr, tx) = args(data)?;
-    let hash = H256::from(keccak::hash(tx).to_bytes());
-    let tx = Tx::from_instruction(tx)?;
+    let (session, holder, fee_addr, rlp) = args(data)?;
+    let hash = H256::from(keccak::hash(rlp).to_bytes());
+    let chain = Tx::chain_id_from_rlp(rlp)?;
 
     let state = State::new(
         program_id,
         Some(*signer),
         Arc::clone(&client),
-        tx.chain_id(),
+        chain,
     )?;
-    let context = ContextIterative::new(&state, holder, &tx, hash, session, fee_addr)?;
+    let context = ContextIterative::new(&state, holder, hash, session, fee_addr, rlp)?;
     iterative_tx(&state, context)
 }

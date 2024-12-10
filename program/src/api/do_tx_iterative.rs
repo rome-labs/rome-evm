@@ -35,17 +35,17 @@ pub fn do_tx_iterative<'a>(
 ) -> Result<()> {
     msg!("Instruction: Iterative transaction");
 
-    let (session, holder, fee_addr, lock_overrides, tx) = args(data)?;
-    let hash = H256::from(keccak::hash(tx).to_bytes());
-    let tx = Tx::from_instruction(tx)?;
+    let (session, holder, fee_addr, lock_overrides, rlp) = args(data)?;
+    let hash = H256::from(keccak::hash(rlp).to_bytes());
+    let chain_id = Tx::chain_id_from_rlp(rlp)?;
 
-    let state = State::new(program_id, accounts, tx.chain_id())?;
+    let state = State::new(program_id, accounts, chain_id)?;
     let context = ContextIterative::new(
         &state,
         accounts,
         holder,
         lock_overrides,
-        tx,
+        rlp,
         hash,
         session,
         fee_addr,
