@@ -99,6 +99,10 @@ impl<'a, 'b> Context for ContextIterative<'a, 'b> {
     fn fee_recipient(&self) -> Option<H160> {
         self.fee_addr
     }
+
+    fn state_holder_len(&self) -> Result<usize> {
+        Ok(Holder::size(self.state_holder))
+    }
 }
 
 // these functions are used both in the contract and in the emulator

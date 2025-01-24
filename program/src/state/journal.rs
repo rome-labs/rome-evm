@@ -12,29 +12,13 @@ use {
 #[allow(dead_code)]
 #[derive(BorshSerialize, BorshDeserialize, Clone)]
 pub enum Diff {
-    TransferFrom {
-        balance: U256,
-    },
-    TransferTo {
-        balance: U256,
-    },
+    TransferFrom { balance: U256 },
+    TransferTo { balance: U256 },
     NonceChange,
-    StorageChange {
-        key: U256,
-        value: U256,
-    },
-    TStorageChange {
-        key: U256,
-        value: U256,
-    },
-    CodeChange {
-        code: Vec<u8>,
-        valids: Vec<u8>,
-    },
-    Event {
-        topics: Vec<H256>,
-        data: Vec<u8>,
-    },
+    StorageChange { key: U256, value: U256 },
+    TStorageChange { key: U256, value: U256 },
+    CodeChange { code: Vec<u8>, valids: Vec<u8> },
+    Event { topics: Vec<H256>, data: Vec<u8> },
 }
 /// Journal entries that are used to track changes to the state and are used to revert it.
 #[derive(Default)]
@@ -229,10 +213,10 @@ impl Journal {
                     Diff::TransferTo { balance } => {
                         msg!("TransferTo");
                         state.add_balance(address, balance, context)?;
-                    },
-                    Diff::TStorageChange {..} => {
+                    }
+                    Diff::TStorageChange { .. } => {
                         msg!("TStorageChange");
-                    },
+                    }
                 }
             }
         }
@@ -337,18 +321,35 @@ impl Journal {
             parent.selfdestruct(address)
         }
 
-        if let Some(diffs)  = self.diff.get_mut(address) {
-            *diffs  = diffs
+        if let Some(diffs) = self.diff.get_mut(address) {
+            *diffs = diffs
                 .iter()
-                .filter(|a|
-                    match a {
-                        Diff::TransferFrom { balance: _ } | Diff::TransferTo { balance: _ } => {
-                            true
-                        }
-                        _ => false
-                    })
+                .filter(|a| {
+                    matches!(
+                        a,
+                        Diff::TransferFrom { balance: _ } | Diff::TransferTo { balance: _ }
+                    )
+                })
                 .cloned()
                 .collect::<Vec<_>>();
+        }
+    }
+
+    pub fn found_storage(&self) -> bool {
+        let found = self.diff.iter().any(|(_, diffs)| {
+            diffs
+                .iter()
+                .any(|diff| matches!(diff, Diff::StorageChange { key: _, value: _ }))
+        });
+
+        if found {
+            return true;
+        }
+
+        if let Some(parent) = self.parent.as_ref() {
+            parent.found_storage()
+        } else {
+            false
         }
     }
 }

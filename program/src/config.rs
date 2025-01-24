@@ -16,5 +16,5 @@ pub const NUMBER_ALLOC_DIFF_PER_TX: u64 = 10; // mut be <= 64  (max_instruction_
 pub const STORAGE_LEN: usize = 256; // must be <= u8::MAX+1
 pub mod upgrade_authority {
     // rome-owner-keypair.json
-    solana_program::declare_id!("RD1B5ZirpFv5HpuUWbzrRH9eV5dyrQrnCji7AoTQYF8");
+    solana_program::declare_id!("8q76RPN5Tm6thVoQAUFhUP2diddGgtDLA6B6eShSazB2");
 }

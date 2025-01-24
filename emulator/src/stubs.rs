@@ -43,7 +43,7 @@ impl SyscallStubs for Stubs {
         unsafe {
             #[allow(clippy::cast_ptr_alignment)]
             let rent = pointer.cast::<Rent>();
-            *rent = self.rent;
+            *rent = self.rent.clone();
         }
         0
     }

@@ -1,5 +1,3 @@
-version: "3"
-
 services:
   solana:
     container_name: solana
@@ -45,19 +43,26 @@ services:
     hostname: proxy
     environment:
       SERVICE_NAME: proxy
-      PROXY_CONFIG: /opt/ci/proxy/proxy_config.yaml
-    ports:
-      - 0.0.0.0:9090:9090
-    expose:
-      - "9090"
+      PROXY_CONFIG: /opt/cfg/proxy-config.yml
     volumes:
-      -  .:/opt/ci
+      - ./keys:/opt/keys
+      - ./cfg:/opt/cfg
+    ports:
+      - 9090:9090
     networks:
       - net
     depends_on:
       solana:
-        condition: service_started
-
+        condition: service_healthy
+    healthcheck:
+      test: [
+        CMD-SHELL,
+        "curl --location 'proxy:9090' --header 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":83}'"
+      ]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
 
   uniswap-v2-core:
     container_name: uniswap

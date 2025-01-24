@@ -1,6 +1,6 @@
 use {
     super::PrecompileResult, evm::H160,
-    solana_program::alt_bn128::prelude::alt_bn128_multiplication, solana_program::msg,
+    solana_bn254::prelude::alt_bn128_multiplication, solana_program::msg,
 };
 
 pub const ADDRESS: H160 = H160([

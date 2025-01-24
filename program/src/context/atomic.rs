@@ -63,4 +63,7 @@ impl<'a, 'b> Context for ContextAtomic<'a, 'b> {
     fn fee_recipient(&self) -> Option<H160> {
         self.fee_addr
     }
+    fn state_holder_len(&self) -> Result<usize> {
+        unreachable!()
+    }
 }

@@ -68,6 +68,7 @@ impl AccountLock for ContextIterative<'_, '_> {
                         }
                         Some(LockType::Rw(_)) => return Err(AccountLocked(*info.key, lock.lock)),
                         None => {
+                            // TODO: split allocation and deallocations to different iterations
                             // allocate/deallocate ro-lock-info
                             let len = RoLock::offset(ro_lock_info) + size_of::<RoLock>();
                             self.state.realloc(ro_lock_info, len)?;

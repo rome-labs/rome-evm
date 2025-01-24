@@ -1,5 +1,5 @@
 use {
-    super::PrecompileResult, evm::H160, solana_program::alt_bn128::prelude::alt_bn128_addition,
+    super::PrecompileResult, evm::H160, solana_bn254::prelude::alt_bn128_addition,
     solana_program::msg,
 };
 

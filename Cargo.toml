@@ -12,15 +12,17 @@ resolver = "2"
 [workspace.dependencies]
 thiserror = "1.0.58"
 # solana
-solana-client = "1.18.17"
-solana-sdk = "1.18.17"
-solana-program = "1.18.17"
+
+solana-client = "2.1.7"
+solana-sdk = "2.1.7"
+solana-program = { version = "2.1.7", features = ["borsh"] }
+solana-bn254 = {version = "2.1.7"}
+
 hex = "0.4.3"
 rlp = { version = "0.5.2", features = ["derive"] }
 bincode = "1.3.1"
 ripemd = "0.1"
-borsh = "0.9.3"
-borsh-derive = "0.9.3"
+borsh = { version = "1.5.3", features = ["derive", "unstable__schema"] }
+
 # evm
 evm = { git = "https://github.com/rome-labs/evm.git", branch = "master"}
- 

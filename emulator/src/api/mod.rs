@@ -28,8 +28,10 @@ pub use eth_get_storage_at::eth_get_storage_at;
 pub use eth_get_tx_count::eth_get_tx_count;
 pub use get_rollups::get_rollups;
 pub use reg_owner::reg_owner;
+use solana_program::entrypoint::MAX_PERMITTED_DATA_INCREASE;
 pub use transmit_tx::transmit_tx;
 
+use rome_evm::NUMBER_OPCODES_PER_TX;
 use {
     crate::state::{Item, Slots, State},
     rome_evm::{
@@ -62,6 +64,7 @@ pub struct Emulation {
     pub gas: u64,
     pub lock_overrides: Vec<u8>,
     pub syscalls: u64,
+    pub is_atomic: bool,
 }
 
 impl Emulation {
@@ -79,7 +82,11 @@ impl Emulation {
         lock_overrides: Vec<Pubkey>,
         syscalls: u64,
     ) -> Result<Self> {
-        let gas = Emulation::gas(alloc_state, dealloc_state, iter_count)?;
+        let is_atomic = steps_executed <= NUMBER_OPCODES_PER_TX
+            && alloc <= MAX_PERMITTED_DATA_INCREASE
+            && syscalls < 64;
+
+        let gas = Emulation::gas(alloc_state, dealloc_state, iter_count, is_atomic)?;
 
         let lock_overrides = Emulation::cast_overrides(state, lock_overrides)?;
 
@@ -94,6 +101,7 @@ impl Emulation {
         msg!("gas: {:?}", gas);
         msg!("lock_overrides: {:?}", lock_overrides);
         msg!("syscalls: {}", syscalls);
+        msg!("is_atomic: {}", is_atomic);
 
         Emulation::log_accounts(state)?;
 
@@ -115,6 +123,7 @@ impl Emulation {
             gas,
             lock_overrides,
             syscalls,
+            is_atomic,
         })
     }
 
@@ -166,7 +175,7 @@ impl Emulation {
     pub fn without_vm(state: &State) -> Result<Self> {
         let alloc_state = *state.alloc_state.borrow();
         let dealloc_state = *state.dealloc_state.borrow();
-        let gas = Emulation::gas(alloc_state, dealloc_state, 1)?;
+        let gas = Emulation::gas(alloc_state, dealloc_state, 1, true)?;
 
         msg!(">> emulation results:");
         msg!("allocated: {}", state.allocated());
@@ -186,14 +195,31 @@ impl Emulation {
             gas,
             lock_overrides: vec![],
             syscalls: state.pda.syscall.count(),
+            is_atomic: true,
         })
     }
 
-    pub fn gas(alloc_state: usize, dealloc_state: usize, iter_count: u64) -> Result<u64> {
+    pub fn gas(
+        alloc_state: usize,
+        dealloc_state: usize,
+        iter_count: u64,
+        is_atomic: bool,
+    ) -> Result<u64> {
         let space_to_pay = alloc_state.saturating_sub(dealloc_state);
-        let rent = Rent::get()?.minimum_balance(space_to_pay);
 
-        Ok(rent + SIG_VERIFY_COST * iter_count)
+        let rent = if space_to_pay > 0 {
+            Rent::get()?.minimum_balance(space_to_pay)
+        } else {
+            0
+        };
+
+        let sig_veify_cost = if is_atomic {
+            SIG_VERIFY_COST
+        } else {
+            SIG_VERIFY_COST * iter_count
+        };
+
+        Ok(rent + sig_veify_cost)
     }
 
     pub fn cast_overrides(state: &State, overrides: Vec<Pubkey>) -> Result<Vec<u8>> {

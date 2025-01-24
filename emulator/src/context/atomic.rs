@@ -9,16 +9,16 @@ use {
         vm::{vm_iterative::MachineIterative, Vm},
         Iterations, H160, H256,
     },
-    solana_program::account_info::{AccountInfo, IntoAccountInfo,},
+    solana_program::account_info::{AccountInfo, IntoAccountInfo},
 };
 
 pub struct ContextAtomic<'a, 'b> {
     pub state: &'b State<'a>,
-    pub rlp: &'b[u8],
+    pub rlp: &'b [u8],
     pub fee_addr: Option<H160>,
 }
 impl<'a, 'b> ContextAtomic<'a, 'b> {
-    pub fn new(state: &'b State<'a>, rlp:&'b [u8], fee_addr: Option<H160>) -> Self {
+    pub fn new(state: &'b State<'a>, rlp: &'b [u8], fee_addr: Option<H160>) -> Self {
         Self {
             state,
             rlp,
@@ -63,6 +63,9 @@ impl<'a, 'b> Context for ContextAtomic<'a, 'b> {
     }
     fn fee_recipient(&self) -> Option<H160> {
         self.fee_addr
+    }
+    fn state_holder_len(&self) -> Result<usize> {
+        unreachable!()
     }
 }
 

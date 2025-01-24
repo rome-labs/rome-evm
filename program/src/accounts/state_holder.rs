@@ -12,23 +12,27 @@ use {
 };
 
 #[repr(u8)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Iterations {
     Lock = 1,
     Start = 2,
     Execute = 3,
-    AllocateHolder = 4,
     Allocate = 5,
     MergeSlots = 6,
     AllocateStorage = 7,
     Commit = 8,
     Unlock = 9,
-    Error = 10, // UnnecessaryIteration
+    Unnecessary = 10, // UnnecessaryIteration
 }
 
 impl Iterations {
     pub fn is_complete(&self) -> bool {
-        matches!(self, Iterations::Unlock | Iterations::Error)
+        if !matches!(self, Iterations::Unlock | Iterations::Unnecessary) {
+            solana_program::msg!("not enough iterations, last iteration: {:?}", self);
+            return false;
+        }
+
+        true
     }
 }
 #[repr(C, packed)]

@@ -20,13 +20,13 @@ pub enum MachineIterative {
     IntoTrap,
     GasTransfer,
     Serialize(Box<Self>),
-    AllocateHolder,
+    AllocateHolder(Box<Self>),
     Allocate,
     MergeSlots,
     AllocateStorage,
     Unlock,
     NextIteration(Box<Self>),
-    Error,
+    Unnecessary,
     Commit,
     Exit,
 }
@@ -39,13 +39,12 @@ impl From<Iterations> for MachineIterative {
             Iterations::Lock => Lock,
             Iterations::Start => Init,
             Iterations::Execute => Execute,
-            Iterations::AllocateHolder => AllocateHolder,
             Iterations::Allocate => Allocate,
             Iterations::MergeSlots => MergeSlots,
             Iterations::AllocateStorage => AllocateStorage,
             Iterations::Commit => Commit,
             Iterations::Unlock => Unlock,
-            Iterations::Error => Error,
+            Iterations::Unnecessary => Unnecessary,
         }
     }
 }
@@ -55,13 +54,12 @@ impl From<&MachineIterative> for Iterations {
             Lock => Iterations::Lock,
             Init => Iterations::Start,
             Execute => Iterations::Execute,
-            AllocateHolder => Iterations::AllocateHolder,
             Allocate => Iterations::Allocate,
             MergeSlots => Iterations::MergeSlots,
             AllocateStorage => Iterations::AllocateStorage,
             Commit => Iterations::Commit,
             Unlock => Iterations::Unlock,
-            Error => Iterations::Error,
+            Unnecessary => Iterations::Unnecessary,
             _ => panic!("VmFault: MachineIterativeative to Iterations cast error"),
         }
     }
@@ -96,9 +94,9 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
         let state_machine = match state_machine {
             FromStateHolder => {
                 msg!("FromStateHolder");
-                // found allocations (it can be holder account) in current iteration
-                if self.handler.state.allocated() > 0 {
-                    NextIteration(Box::new(Lock))
+
+                if self.context.state_holder_len()? == 0 {
+                    AllocateHolder(Box::new(Lock))
                 } else {
                     // state_holder stores tx_hash and session_id
                     if self.context.exists_session()? {
@@ -136,7 +134,7 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
                         match io.kind() {
                             // holder.data is invalid, it cannot be used. The state is lost.
                             // We need to start from the beginning
-                            std::io::ErrorKind::WriteZero => AllocateHolder,
+                            std::io::ErrorKind::WriteZero => AllocateHolder(Box::new(Init)),
                             _ => return Err(IoError(io)),
                         }
                     }
@@ -144,14 +142,10 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
                     Ok(()) => NextIteration(to),
                 }
             }
-            AllocateHolder => {
+            AllocateHolder(to) => {
                 msg!("AllocateHolder");
-                if !self.context.locked()? {
-                    NextIteration(Box::new(Lock))
-                } else {
-                    self.context.allocate_holder()?;
-                    NextIteration(Box::new(Init))
-                }
+                self.context.allocate_holder()?;
+                NextIteration(to)
             }
             Execute => {
                 msg!("Execute");
@@ -183,7 +177,12 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
                 if !self.context.locked()? {
                     NextIteration(Box::new(Lock))
                 } else if self.handler.allocate(self.context)? {
-                    Serialize(Box::new(MergeSlots))
+                    if self.handler.journal.found_storage() {
+                        Serialize(Box::new(MergeSlots))
+                    } else {
+                        // skip merge slots, allocate slots
+                        GasTransfer
+                    }
                 } else {
                     Serialize(Box::new(Allocate))
                 }
@@ -230,9 +229,9 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIterative>
                 msg!("Unlock");
                 self.context.unlock()?;
                 // todo: deallocate holders?
-                NextIteration(Box::new(Error))
+                NextIteration(Box::new(Unnecessary))
             }
-            Error => {
+            Unnecessary => {
                 msg!("UnnecessaryIteration: {}", self.context.tx_hash());
                 return Err(UnnecessaryIteration(self.context.tx_hash()));
             }

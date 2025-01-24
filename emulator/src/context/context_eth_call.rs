@@ -4,7 +4,7 @@ use {
         context::{account_lock::AccountLock, Context},
         error::Result,
         state::{origin::Origin, Allocate},
-        tx::{tx::Tx, legacy::Legacy},
+        tx::{legacy::Legacy, tx::Tx},
         vm::{vm_iterative::MachineIterative, Vm},
         H160, H256,
     },
@@ -16,9 +16,7 @@ pub struct ContextEthCall {
 }
 impl ContextEthCall {
     pub fn new(legacy: Legacy) -> Self {
-        Self {
-            legacy,
-        }
+        Self { legacy }
     }
 }
 
@@ -61,6 +59,9 @@ impl Context for ContextEthCall {
     }
     fn check_nonce(&self) -> bool {
         false
+    }
+    fn state_holder_len(&self) -> Result<usize> {
+        unreachable!()
     }
 }
 

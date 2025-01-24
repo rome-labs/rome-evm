@@ -1,9 +1,6 @@
 use {
     crate::state::State,
-    rome_evm::{
-        error::{Result, RomeProgramError::Custom},
-        StateHolder, H256,
-    },
+    rome_evm::{error::Result, StateHolder, H256},
     solana_client::rpc_client::RpcClient,
     solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey},
     std::sync::Arc,
@@ -24,10 +21,11 @@ pub fn confirm_tx_iterative(
     let info = bind.into_account_info();
 
     if !StateHolder::is_linked(&info, hash, session)? {
-        return Err(Custom(format!(
+        msg!(
             "Iterative tx is not linked to state holder account: {}",
             info.key
-        )));
+        );
+        return Ok(false);
     }
 
     Ok(StateHolder::get_iteration(&info)?.is_complete())

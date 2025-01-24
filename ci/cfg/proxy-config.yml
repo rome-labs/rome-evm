@@ -1,0 +1,13 @@
+chain_id: 1001
+program_id: "CmobH2vR6aUtQ8x4xd1LYNiH6k2G7PFT5StTgWqvy2VU"
+start_slot: 0
+solana:
+  rpc_url: "http://solana:8899"
+  commitment: "confirmed"
+payers:
+  - payer_keypair: "/opt/keys/upgrade-authority-keypair.json"
+    number_holders: 32
+ethereum_storage:
+  type: "in_memory_storage"
+proxy_host: "0.0.0.0:9090"
+max_slot_history: 4096

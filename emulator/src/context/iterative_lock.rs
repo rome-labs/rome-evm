@@ -10,6 +10,7 @@ use {
     std::mem::size_of,
 };
 
+#[allow(dead_code)]
 pub fn add_ro_lock(state: &State, info: &AccountInfo, state_holder: &Bind) -> Result<()> {
     let mut lock = Lock::from_account_mut(info)?;
     let mut ro_lock_bind = state.info_ro_lock(info.key, true)?;
@@ -56,7 +57,7 @@ pub fn add_rw_lock(info: &AccountInfo, state_holder: &Bind) -> Result<()> {
 
 pub fn iterative_lock(state: &State, holder: u64) -> Result<Vec<Pubkey>> {
     let state_holder = state.info_state_holder(holder, false)?;
-    let mut lock_overrides = vec![];
+    let lock_overrides = vec![];
 
     let accounts = state.accounts.borrow().clone();
 
@@ -65,12 +66,14 @@ pub fn iterative_lock(state: &State, holder: u64) -> Result<Vec<Pubkey>> {
         let info = bind.into_account_info();
 
         if Lock::is_managed(&info, state.program_id)? {
-            if item.writable {
-                add_rw_lock(&info, &state_holder)?;
-            } else {
-                add_ro_lock(state, &info, &state_holder)?;
-                lock_overrides.push(*key);
-            }
+            // TODO: enable ro-lock after the ALT is implemented
+            add_rw_lock(&info, &state_holder)?;
+            // if item.writable {
+            //     add_rw_lock(&info, &state_holder)?;
+            // } else {
+            //     add_ro_lock(state, &info, &state_holder)?;
+            //     lock_overrides.push(*key);
+            // }
             // all accounts must be writable
             state.update(bind)?;
         }

@@ -11,7 +11,7 @@ use {
         state::{origin::Origin, Allocate},
         tx::{legacy::Legacy, tx::Tx},
         vm::{vm_iterative::MachineIterative, Vm},
-        Iterations, H160, H256, StateHolder,
+        Data, Holder, Iterations, StateHolder, H160, H256,
     },
     solana_program::{
         account_info::{AccountInfo, IntoAccountInfo},
@@ -31,7 +31,7 @@ pub struct ContextEstimateGas<'a, 'b> {
 }
 impl<'a, 'b> ContextEstimateGas<'a, 'b> {
     pub fn new(state: &'b State<'a>, legacy: Legacy) -> Result<Self> {
-        let hash = H256::from(keccak::hash(&[1, 2 ,3]).to_bytes());
+        let hash = H256::from(keccak::hash(&[1, 2, 3]).to_bytes());
         let holder = 0;
         let _state_holder = state.info_state_holder(holder, true)?;
         Ok(Self {
@@ -114,6 +114,12 @@ impl<'a, 'b> Context for ContextEstimateGas<'a, 'b> {
 
     fn check_nonce(&self) -> bool {
         false
+    }
+
+    fn state_holder_len(&self) -> Result<usize> {
+        let mut bind = self.state.info_state_holder(self.holder, false)?;
+        let info = bind.into_account_info();
+        Ok(Holder::size(&info))
     }
 }
 

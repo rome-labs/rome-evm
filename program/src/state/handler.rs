@@ -178,7 +178,7 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
                 self.state.code(&address).map_or(0, |vec| vec.len())
             };
 
-            if onchain_code_size == 0  {
+            if onchain_code_size == 0 {
                 self.journal.selfdestruct(&address)
             }
         }
@@ -287,19 +287,12 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
         Ok(())
     }
 
-    fn call_feedback(
-        &mut self,
-        _feedback: Self::CallFeedback,
-    ) -> Result<(), ExitError> {
+    fn call_feedback(&mut self, _feedback: Self::CallFeedback) -> Result<(), ExitError> {
         Ok(())
     }
 
     /// Handle other unknown external opcodes.
-    fn other(
-        &mut self,
-        opcode: Opcode,
-        _stack: &mut Machine,
-    ) -> Result<(), ExitError> {
+    fn other(&mut self, opcode: Opcode, _stack: &mut Machine) -> Result<(), ExitError> {
         Err(ExitError::IncompatibleVersionEVM(opcode.0))
     }
 
@@ -311,7 +304,12 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
         U256::zero()
     }
 
-    fn set_transient_storage(&mut self, address: H160, index: U256, value: U256) -> Result<(), ExitError> {
+    fn set_transient_storage(
+        &mut self,
+        address: H160,
+        index: U256,
+        value: U256,
+    ) -> Result<(), ExitError> {
         if !self.mutable {
             return Err(ExitError::StaticModeViolation);
         }
@@ -321,5 +319,4 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
             .push(Diff::TStorageChange { key: index, value });
         Ok(())
     }
-
 }

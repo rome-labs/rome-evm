@@ -1,7 +1,9 @@
 use {
+    super::Emulation,
     crate::{context::ContextEthCall, state::State},
     rome_evm::{
         error::Result,
+        origin::Origin,
         tx::legacy::Legacy,
         vm::{Execute, MachineEthCall, Vm},
     },
@@ -10,12 +12,26 @@ use {
     std::sync::Arc,
 };
 
-pub fn eth_call(program_id: &Pubkey, legacy: Legacy, client: Arc<RpcClient>) -> Result<Vec<u8>> {
+pub fn eth_call(program_id: &Pubkey, legacy: Legacy, client: Arc<RpcClient>) -> Result<Emulation> {
     msg!("eth_call");
     let state = State::new(program_id, None, client, legacy.chain_id.as_u64())?;
     let context = ContextEthCall::new(legacy);
     let mut vm = Vm::new_eth_call(&state, &context)?;
     vm.consume(MachineEthCall::Init)?;
 
-    Ok(vm.return_value.unwrap_or_default())
+    let report = Emulation::with_vm(
+        &state,
+        vm.exit_reason,
+        vm.return_value,
+        vm.steps_executed,
+        1,
+        state.allocated(),
+        state.deallocated(),
+        *state.alloc_state.borrow(),
+        *state.dealloc_state.borrow(),
+        vec![],
+        state.syscall.count(),
+    );
+
+    report
 }

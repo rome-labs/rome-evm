@@ -13,7 +13,6 @@ solana-sdk = { workspace = true }
 bincode = { workspace = true }
 hex = { workspace = true }
 borsh = { workspace = true }
-borsh-derive = { workspace = true }
 
 [lib]
 name = "emulator"

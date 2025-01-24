@@ -37,4 +37,5 @@ pub trait Context {
     fn check_nonce(&self) -> bool {
         true
     }
+    fn state_holder_len(&self) -> Result<usize>;
 }

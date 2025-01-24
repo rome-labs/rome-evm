@@ -11,7 +11,7 @@ use {
         state::{origin::Origin, Allocate},
         tx::tx::Tx,
         vm::{vm_iterative::MachineIterative, Vm},
-        Iterations, StateHolder, H160, H256,
+        Data, Holder, Iterations, StateHolder, H160, H256,
     },
     solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey},
     std::cell::RefCell,
@@ -34,7 +34,7 @@ impl<'a, 'b> ContextIterative<'a, 'b> {
         tx_hash: H256,
         session: u64,
         fee_addr: Option<H160>,
-        rlp: &'b[u8],
+        rlp: &'b [u8],
     ) -> Result<Self> {
         // allocation affects the vm behaviour.
         // it is important to allocate state_holder before the starting the vm
@@ -48,7 +48,7 @@ impl<'a, 'b> ContextIterative<'a, 'b> {
             lock_overrides: RefCell::new(vec![]),
             session,
             fee_addr,
-            rlp
+            rlp,
         })
     }
 }
@@ -116,6 +116,12 @@ impl<'a, 'b> Context for ContextIterative<'a, 'b> {
 
     fn fee_recipient(&self) -> Option<H160> {
         self.fee_addr
+    }
+
+    fn state_holder_len(&self) -> Result<usize> {
+        let mut bind = self.state.info_state_holder(self.holder, false)?;
+        let info = bind.into_account_info();
+        Ok(Holder::size(&info))
     }
 }
 

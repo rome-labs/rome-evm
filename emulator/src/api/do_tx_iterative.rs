@@ -58,7 +58,7 @@ pub fn iterative_tx<L: AccountLock + Context + LockOverrides>(
                     vm.exit_reason,
                     vm.return_value,
                     steps,
-                    iteration,
+                    iteration - 1, // do not take into account the unnecessary iteration
                     alloc,
                     dealloc,
                     alloc_state,
@@ -77,7 +77,6 @@ pub fn iterative_tx<L: AccountLock + Context + LockOverrides>(
         dealloc_state += *state.dealloc_state.borrow();
         syscalls += state.syscall.count();
 
-        msg!("syscalls: {}", state.syscall.count());
         state.reset();
     }
 }
@@ -93,12 +92,7 @@ pub fn do_tx_iterative<'a>(
     let hash = H256::from(keccak::hash(rlp).to_bytes());
     let chain = Tx::chain_id_from_rlp(rlp)?;
 
-    let state = State::new(
-        program_id,
-        Some(*signer),
-        Arc::clone(&client),
-        chain,
-    )?;
+    let state = State::new(program_id, Some(*signer), Arc::clone(&client), chain)?;
     let context = ContextIterative::new(&state, holder, hash, session, fee_addr, rlp)?;
     iterative_tx(&state, context)
 }

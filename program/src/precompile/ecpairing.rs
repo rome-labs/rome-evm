@@ -1,5 +1,5 @@
 use {
-    super::PrecompileResult, evm::H160, solana_program::alt_bn128::prelude::alt_bn128_pairing,
+    super::PrecompileResult, evm::H160, solana_bn254::prelude::alt_bn128_pairing,
     solana_program::msg,
 };
 

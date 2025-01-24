@@ -219,6 +219,7 @@ impl<'a> State<'a> {
         let f = |len: usize, func: &dyn Fn(&State<'a>, usize) -> Result<()>| -> Result<()> {
             match typ {
                 New => Err(Custom(format!("resizing of uninitialized account {}", key))),
+                // TODO: remove RoLock from alloc_state
                 Balance | Storage | AccountType::RoLock => func(self, len),
                 _ => Ok(()),
             }
