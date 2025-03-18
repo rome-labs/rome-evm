@@ -3,7 +3,6 @@ use {
     crate::{context::ContextEthCall, state::State},
     rome_evm::{
         error::Result,
-        origin::Origin,
         tx::legacy::Legacy,
         vm::{Execute, MachineEthCall, Vm},
     },
@@ -25,10 +24,10 @@ pub fn eth_call(program_id: &Pubkey, legacy: Legacy, client: Arc<RpcClient>) -> 
         vm.return_value,
         vm.steps_executed,
         1,
-        state.allocated(),
-        state.deallocated(),
-        *state.alloc_state.borrow(),
-        *state.dealloc_state.borrow(),
+        state.alloc(),
+        state.dealloc(),
+        state.alloc_payed(),
+        state.dealloc_payed(),
         vec![],
         state.syscall.count(),
     );

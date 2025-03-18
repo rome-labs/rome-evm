@@ -1,13 +1,13 @@
 use {
     crate::{
-        error::Result, state::Syscall, upgrade_authority, AccountState, AccountType, Data,
+        error::Result, state::base::Syscall, upgrade_authority, AccountState, AccountType, Data,
         OwnerInfo, RoLock, StateHolder, Storage, TxHolder, ACCOUNT_SEED, OWNER_INFO, RO_LOCK_SEED,
         STATE_HOLDER_SEED, STORAGE_LEN, TX_HOLDER_SEED,
     },
     borsh::{BorshDeserialize, BorshSerialize},
     evm::{H160, U256},
     solana_program::{account_info::AccountInfo, pubkey::Pubkey},
-    std::{cell::RefCell, collections::HashMap},
+    std::{cell::RefCell, collections::HashMap, rc::Rc},
 };
 
 #[derive(BorshSerialize, BorshDeserialize, Default, Clone)]
@@ -24,6 +24,16 @@ impl Seed {
     pub fn add(&mut self, bump_seed: u8) {
         self.items.push(vec![bump_seed]);
     }
+    pub fn from_vec(slice: Vec<&[u8]>) -> Self {
+        let items = slice
+            .iter()
+            .map(|&a| a.to_vec())
+            .collect::<Vec<_>>();
+
+        Self {
+            items
+        }
+    }
 }
 
 type BaseIndex = (Pubkey, [u8; 32]);
@@ -34,11 +44,11 @@ pub struct Pda<'a> {
     pub balance: RefCell<HashMap<H160, (Pubkey, Seed)>>,
     pub storage: RefCell<HashMap<BaseIndex, (Pubkey, Seed)>>,
     pub ro_lock: RefCell<HashMap<Pubkey, (Pubkey, Seed)>>,
-    pub syscall: Syscall,
+    pub syscall: Rc<Syscall>,
 }
 
 impl<'a> Pda<'a> {
-    pub fn new(program_id: &'a Pubkey, chain: u64, syscall: Syscall) -> Self {
+    pub fn new(program_id: &'a Pubkey, chain: u64, syscall: Rc<Syscall>) -> Self {
         Self {
             chain: chain.to_le_bytes().to_vec(),
             program_id,
@@ -62,13 +72,24 @@ impl<'a> Pda<'a> {
                 address.as_bytes().to_vec(),
             ],
         };
+        // TODO: move seed to find_pda
         let (key, bump_seed) = self.find_pda(&seed);
         seed.add(bump_seed);
         balance.insert(*address, (key, seed.clone()));
 
         (key, seed)
     }
+    pub fn from_balance_key(&self, address: &H160, salt: &[u8]) -> (Pubkey, Seed) {
+        let (key, _) = self.balance_key(address);
 
+        let vec = vec![key.as_ref(), salt];
+        let mut seed = Seed::from_vec(vec);
+
+        let (key, bump) = self.find_pda(&seed);
+        seed.add(bump);
+
+        (key, seed)
+    }
     pub fn tx_holder_key(&self, base: &Pubkey, index: u64) -> (Pubkey, Seed) {
         let mut seed = Seed {
             items: vec![
@@ -196,8 +217,15 @@ impl<'a> Pda<'a> {
         Ok(())
     }
 
-    pub fn find_pda(&self, seed: &Seed) -> (Pubkey, u8) {
+    fn find_pda(&self, seed: &Seed) -> (Pubkey, u8) {
         self.syscall.inc();
         Pubkey::find_program_address(seed.cast().as_slice(), self.program_id)
+    }
+
+    #[cfg(not(target_os = "solana"))]
+    pub fn reset(&self) {
+        self.balance.borrow_mut().clear();
+        self.storage.borrow_mut().clear();
+        self.ro_lock.borrow_mut().clear();
     }
 }

@@ -197,6 +197,7 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         snapshot: Box<Snapshot>,
         reason: ExitReason,
     ) -> Option<(Vec<u8>, ExitReason)> {
+        // TODO: check return_value in case of revert
         let return_value = snapshot.evm.machine().return_value();
 
         if let Some(snapshot) = self.snapshot.as_mut() {

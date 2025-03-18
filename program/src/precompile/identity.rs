@@ -1,11 +1,9 @@
-use {super::PrecompileResult, evm::H160, solana_program::msg};
+use {evm::H160, solana_program::msg, super::impl_contract};
 
-pub const ADDRESS: H160 = H160([
-    0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4,
-]);
+impl_contract!(Identity, [0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4,]);
 
 #[must_use]
-pub fn contract(input: &[u8]) -> PrecompileResult {
+fn contract(input: &[u8]) -> Vec<u8> {
     msg!("identity");
 
     input.to_vec()

@@ -1,8 +1,8 @@
 use {
     rome_evm::error::Result,
     solana_client::rpc_client::RpcClient,
-    solana_program::{clock::Clock, rent::Rent, sysvar},
-    solana_sdk::program_stubs::SyscallStubs,
+    solana_program::{clock::Clock, rent::Rent, sysvar, program_stubs::SyscallStubs},
+    // solana_sdk::program_stubs::SyscallStubs,
     std::sync::Arc,
 };
 
@@ -30,7 +30,7 @@ impl Stubs {
                 sysvar::rent::ID => {
                     stubs.rent = bincode::deserialize(&acc.data)?;
                 }
-                _ => unreachable!(),
+                _ => unreachable!()
             }
         }
 

@@ -1,16 +1,14 @@
 use {
-    super::PrecompileResult,
     crate::tx::tx::Tx,
     evm::{H160, U256},
     solana_program::msg,
     std::{cmp::Ordering::*, convert::TryInto},
+    super::impl_contract,
 };
 
-pub const ADDRESS: H160 = H160([
-    0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-]);
+impl_contract!(Ecrecover, [0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,]);
 
-pub fn contract(input: &[u8]) -> PrecompileResult {
+fn contract(input: &[u8]) -> Vec<u8> {
     msg!("ecrecover");
 
     let len = input.len();
@@ -28,7 +26,10 @@ pub fn contract(input: &[u8]) -> PrecompileResult {
     let (v, rs) = right.split_at(32);
 
     let v = U256::from_big_endian(v);
-    assert!(v == 27.into() || v == 28.into());
+
+    if v != 27.into() && v != 28.into() {
+        return vec![];
+    }
 
     let v = v.as_u64() as u8;
 

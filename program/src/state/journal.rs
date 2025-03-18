@@ -1,7 +1,7 @@
 use {
     crate::{
-        allocate::Allocate, context::account_lock::AccountLock, error::Result, origin::Origin,
-        NUMBER_ALLOC_DIFF_PER_TX,
+        allocate::Allocate, aux::Ix, context::account_lock::AccountLock, error::Result,
+        origin::Origin, non_evm::NonEvmState, NUMBER_ALLOC_DIFF_PER_TX,
     },
     borsh::{BorshDeserialize, BorshSerialize},
     evm::{H160, H256, U256},
@@ -20,10 +20,13 @@ pub enum Diff {
     CodeChange { code: Vec<u8>, valids: Vec<u8> },
     Event { topics: Vec<H256>, data: Vec<u8> },
 }
+
 /// Journal entries that are used to track changes to the state and are used to revert it.
 #[derive(Default)]
 pub struct Journal {
     pub diff: BTreeMap<H160, Vec<Diff>>,
+    pub non_evm_ix: Option<Vec<Ix>>,
+    non_evm_state: Option<NonEvmState>,
     pub parent: Option<Box<Journal>>,
 }
 
@@ -31,15 +34,36 @@ impl Journal {
     pub fn new() -> Self {
         Self {
             diff: BTreeMap::new(),
+            non_evm_ix: None,
+            non_evm_state: None, // lazy, cloned from parent on demand
             parent: None,
         }
     }
 
-    pub fn next_page(parent: Box<Journal>) -> Self {
-        Self {
-            diff: BTreeMap::new(),
-            parent: Some(parent),
+    pub fn non_evm_state(&mut self) -> &mut NonEvmState {
+        if self.non_evm_state.is_none() {
+            self.non_evm_state = self.non_evm_state_latest().or(Some(NonEvmState::default()));
         }
+
+        self.non_evm_state.as_mut().unwrap()
+    }
+
+    fn non_evm_state_latest(&self) -> Option<NonEvmState> {
+        if self.non_evm_state.is_some() {
+            return self.non_evm_state.clone();
+        }
+
+        if let Some(parent) = &self.parent {
+            parent.non_evm_state_latest()
+        } else {
+            None
+        }
+    }
+
+    pub fn next_page(parent: Box<Journal>) -> Self {
+        let mut new = Self::new();
+        new.parent = Some(parent);
+        new
     }
 
     pub fn nonce_diff(&self, address: &H160) -> u64 {
@@ -52,6 +76,7 @@ impl Journal {
         if let Some(items) = self.diff.get(address) {
             for item in items {
                 if let Diff::NonceChange = item {
+                    // nonce = nonce
                     nonce += 1;
                 }
             }
@@ -159,6 +184,9 @@ impl Journal {
         }
 
         self.diff.serialize(into)?;
+        // TODO: exclude read-only accounts
+        self.non_evm_ix.serialize(into)?;
+        self.non_evm_state.serialize(into)?;
         Ok(())
     }
     pub fn serialize(&self, into: &mut &mut [u8]) -> Result<()> {
@@ -173,16 +201,21 @@ impl Journal {
 
         for _ in 0..depth {
             let diff: BTreeMap<H160, Vec<Diff>> = BorshDeserialize::deserialize(from)?;
+            let non_evm_ix: Option<Vec<Ix>> = BorshDeserialize::deserialize(from)?;
+            let non_evm_state: Option<NonEvmState> = BorshDeserialize::deserialize(from)?;
+
             journal = Some(Box::new(Self {
                 diff,
+                non_evm_ix,
+                non_evm_state,
                 parent: journal,
             }));
         }
 
         Ok(*journal.expect("journal expected"))
     }
-    pub fn commit<T: Origin, L: AccountLock>(&self, state: &T, context: &L) -> Result<()> {
-        if let Some(parent) = self.parent.as_ref() {
+    pub fn commit<T: Origin, L: AccountLock>(&mut self, state: &T, context: &L) -> Result<()> {
+        if let Some(parent) = self.parent.as_mut() {
             parent.commit(state, context)?
         }
 
@@ -221,6 +254,14 @@ impl Journal {
             }
         }
 
+        if let Some(invokes) = self.non_evm_ix.take() {
+            for ix_ in invokes {
+                let (ix, seed) = ix_.cast();
+                msg!("InvokeSigned {}", &ix.program_id);
+                state.invoke_signed(&ix, seed)?;
+            }
+        }
+
         Ok(())
     }
 
@@ -240,7 +281,9 @@ impl Journal {
         for (address, diffs) in &self.diff {
             for diff in diffs {
                 // alloc_limit should be enough to allocate the AccountState
-                if state.syscalls() >= NUMBER_ALLOC_DIFF_PER_TX || state.alloc_limit() < 500 {
+                let base = state.base();
+                if base.pda.syscall.count() >= NUMBER_ALLOC_DIFF_PER_TX || base.alloc_limit() < 500
+                {
                     return Ok(false);
                 }
 
@@ -258,7 +301,7 @@ impl Journal {
                     }
                     Diff::StorageChange { key, value: _ } => {
                         // just to calculate and cache the hash
-                        let (_, _, _) = state.slot_to_key(address, key);
+                        let (_, _, _) = state.base().slot_to_key(address, key);
                     }
                     _ => {}
                 };

@@ -9,10 +9,7 @@ edition = "2021"
 rome-evm = {path = "../program", features = ["no-entrypoint"]}
 solana-program = { workspace = true }
 solana-client = { workspace = true }
-solana-sdk = { workspace = true }
 bincode = { workspace = true }
-hex = { workspace = true }
-borsh = { workspace = true }
 
 [lib]
 name = "emulator"

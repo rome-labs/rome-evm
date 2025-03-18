@@ -4,7 +4,6 @@ use {
     rome_evm::{
         api::split_fee,
         error::Result,
-        origin::Origin,
         tx::tx::Tx,
         vm::{self, vm_atomic::MachineAtomic, Execute},
         H160,
@@ -38,10 +37,10 @@ pub fn atomic_transaction(state: State, rlp: &[u8], fee_addr: Option<H160>) -> R
         vm.return_value,
         vm.steps_executed,
         1,
-        state.allocated(),
-        state.deallocated(),
-        *state.alloc_state.borrow(),
-        *state.dealloc_state.borrow(),
+        state.alloc(),
+        state.dealloc(),
+        state.alloc_payed(),
+        state.dealloc_payed(),
         vec![],
         state.syscall.count(),
     );

@@ -54,7 +54,8 @@ impl<'a, 'b> Context for ContextEstimateGas<'a, 'b> {
         let info = bind.into_account_info();
 
         StateHolder::set_iteration(&info, iteration)?;
-        self.state.update(bind)
+        self.state.update(bind);
+        Ok(())
     }
     fn restore_iteration(&self) -> Result<Iterations> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
@@ -70,7 +71,8 @@ impl<'a, 'b> Context for ContextEstimateGas<'a, 'b> {
         let info = bind.into_account_info();
 
         serialize_impl(&info, vm, self.state)?;
-        self.state.update(bind)
+        self.state.update(bind);
+        Ok(())
     }
     fn deserialize<T: Origin + Allocate, L: AccountLock + Context>(
         &self,
@@ -85,7 +87,8 @@ impl<'a, 'b> Context for ContextEstimateGas<'a, 'b> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let len = bind.1.data.len() + self.state.alloc_limit();
         self.state.realloc(&mut bind, len)?;
-        self.state.update(bind)
+        self.state.update(bind);
+        Ok(())
     }
 
     fn new_session(&self) -> Result<()> {
@@ -93,7 +96,8 @@ impl<'a, 'b> Context for ContextEstimateGas<'a, 'b> {
         let info = bind.into_account_info();
 
         StateHolder::set_link(&info, self.tx_hash, self.session)?;
-        self.state.update(bind)
+        self.state.update(bind);
+        Ok(())
     }
 
     fn exists_session(&self) -> Result<bool> {

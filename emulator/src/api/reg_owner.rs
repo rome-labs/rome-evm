@@ -31,7 +31,7 @@ pub fn reg_owner<'a>(
         let info = bind.into_account_info();
         reg(&info, key, chain)?;
     }
-    state.update(bind)?;
+    state.update(bind);
 
     Emulation::without_vm(&state)
 }

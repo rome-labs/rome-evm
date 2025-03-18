@@ -35,7 +35,8 @@ impl AccountType {
     }
 
     pub fn check_owner(info: &AccountInfo, program_id: &Pubkey) -> Result<()> {
-        if info.owner != program_id {
+        // TODO
+        if info.owner != program_id || info.data_len() == 0 {
             return Err(InvalidOwner(*info.key));
         }
 

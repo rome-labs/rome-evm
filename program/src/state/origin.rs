@@ -4,21 +4,20 @@ use {
         context::account_lock::AccountLock,
         error::{Result, RomeProgramError::*},
         info::Info,
-        pda::{Pda, Seed},
-        state::State,
-        Code, EVENT_LOG,
+        state::{base::Base, State},
+        Code, Account, EVENT_LOG, pda::Seed,
     },
     evm::{H160, H256, U256},
     solana_program::{
-        clock::Slot, entrypoint::MAX_PERMITTED_DATA_INCREASE, log::sol_log_data, pubkey::Pubkey,
-        sysvar::recent_blockhashes,
+        clock::Slot, instruction::Instruction, log::sol_log_data, program::{
+            invoke_signed_unchecked, invoke,
+        },
+        pubkey::Pubkey, sysvar::recent_blockhashes,
     },
     std::cmp::Ordering::*,
 };
 
 pub trait Origin {
-    fn program_id(&self) -> &Pubkey;
-    fn chain_id(&self) -> u64;
     fn nonce(&self, address: &H160) -> Result<u64>;
     fn balance(&self, address: &H160) -> Result<U256>;
     fn code(&self, address: &H160) -> Result<Vec<u8>>;
@@ -95,24 +94,13 @@ pub trait Origin {
 
         Ok(())
     }
-    fn allocated(&self) -> usize;
-    fn deallocated(&self) -> usize;
-    fn alloc_limit(&self) -> usize {
-        MAX_PERMITTED_DATA_INCREASE.saturating_sub(self.allocated())
-    }
-    fn serialize_pda(&self, into: &mut &mut [u8]) -> Result<()>;
-    fn deserialize_pda(&self, from: &mut &[u8]) -> Result<()>;
-    fn slot_to_key(&self, address: &H160, slot: &U256) -> (Pubkey, Seed, u8);
-    fn syscalls(&self) -> u64;
+    fn base(&self) -> &Base;
+    fn account(&self, key: &Pubkey) -> Result<Account>;
+    fn invoke_signed(&self, ix: &Instruction, seed: Seed) -> Result<()>;
+    fn signer(&self) -> Pubkey;
 }
 
 impl Origin for State<'_> {
-    fn program_id(&self) -> &Pubkey {
-        self.program_id
-    }
-    fn chain_id(&self) -> u64 {
-        self.chain
-    }
     fn nonce(&self, address: &H160) -> Result<u64> {
         let info = self.info_addr(address, false)?;
         Info::nonce(self, info)
@@ -215,30 +203,53 @@ impl Origin for State<'_> {
         Info::block_hash(self, sysvar, block, slot)
     }
 
-    fn allocated(&self) -> usize {
-        *self.allocated.borrow()
+    fn base(&self) -> &Base {
+        &self.base
     }
 
-    fn deallocated(&self) -> usize {
-        *self.deallocated.borrow()
+    fn account(&self, key: &Pubkey) -> Result<Account> {
+        let info = self.all()
+            .get(key)
+            .ok_or(AccountNotFound(*key))?;
+
+        let acc = if info.executable {
+            Account::new_executable()
+        } else {
+            Account::from_account_info(info)
+        };
+
+        Ok(acc)
     }
 
-    fn serialize_pda(&self, into: &mut &mut [u8]) -> Result<()> {
-        self.pda.serialize(into)
-    }
+    fn invoke_signed(&self, ix: &Instruction, seed: Seed) -> Result<()> {
+        let f = |key: Pubkey| {
+            self
+                .all()
+                .get(&key)
+                .map(|&x| x.clone())
+                .ok_or(AccountNotFound(key))
+        };
 
-    fn deserialize_pda(&self, from: &mut &[u8]) -> Result<()> {
-        self.pda.deserialize(from)
-    }
+        #[allow(unused_assignments)]
+        let mut infos = Vec::with_capacity(ix.accounts.len() + 1);
 
-    fn slot_to_key(&self, address: &H160, slot: &U256) -> (Pubkey, Seed, u8) {
-        let (index_be, sub_ix) = Pda::storage_index(slot);
-        let (base, _) = self.pda.balance_key(address);
-        let (key, seed) = self.pda.storage_key(&base, index_be);
+        infos = ix
+            .accounts
+            .iter()
+            .map(|a| f(a.pubkey))
+            .collect::<Result<Vec<_>>>()?;
 
-        (key, seed, sub_ix)
+        infos.push(f(ix.program_id)?);
+
+        if seed.items.is_empty() {
+            invoke(ix, infos.as_slice())?;
+        } else {
+            invoke_signed_unchecked(ix, infos.as_slice(), &[seed.cast().as_slice()])?;
+        }
+
+        Ok(())
     }
-    fn syscalls(&self) -> u64 {
-        self.syscall.count()
+    fn signer(&self) -> Pubkey {
+        *self.signer.key
     }
 }

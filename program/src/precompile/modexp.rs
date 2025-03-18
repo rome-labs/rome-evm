@@ -1,17 +1,16 @@
 use {
-    super::PrecompileResult,
     evm::{H160, U256},
     solana_program::big_mod_exp::big_mod_exp,
     solana_program::msg,
     std::convert::TryInto,
+    super::impl_contract,
 };
 
-pub const ADDRESS: H160 = H160([
-    0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5,
-]);
-pub const INPUT_LEN: usize = 96;
+impl_contract!(Modexp, [0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5,]);
 
-pub fn contract(input: &[u8]) -> PrecompileResult {
+const INPUT_LEN: usize = 96;
+
+fn contract(input: &[u8]) -> Vec<u8> {
     msg!("modexp");
     if input.len() < INPUT_LEN {
         return vec![];

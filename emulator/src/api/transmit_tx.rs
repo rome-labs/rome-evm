@@ -27,7 +27,7 @@ pub fn transmit_tx<'a>(
         (len, header, hash)
     };
 
-    let _sys_acc = state.load(&system_program::ID, None)?;
+    let _sys_acc = state.info_sys(&system_program::ID)?;
     // TODO: the client side should implement the holder filling with taking into account holder header allocation
     let to = from + tx.len();
     if hash != ix_hash || to > filled_len {
@@ -37,7 +37,7 @@ pub fn transmit_tx<'a>(
         let info = bind.into_account_info();
         Holder::fill(&info, hash, from, to, tx)?;
     }
-    state.update(bind)?;
+    state.update(bind);
 
     Emulation::without_vm(&state)
 }

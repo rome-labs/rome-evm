@@ -1,8 +1,8 @@
-use {super::PrecompileResult, evm::H160, solana_program::msg, std::convert::TryInto};
+use {
+    evm::H160, solana_program::msg, std::convert::TryInto, super::impl_contract,
+};
 
-pub const ADDRESS: H160 = H160([
-    0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9,
-]);
+impl_contract!(Blake2f, [0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9,]);
 
 const SIGMA: [[usize; 16]; 10] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
@@ -28,7 +28,7 @@ const IV: [u64; 8] = [
     0x5be0cd19137e2179,
 ];
 
-pub const BLAKE2_INPUT_LEN: usize = 213;
+const BLAKE2_INPUT_LEN: usize = 213;
 
 fn g(v: &mut [u64], a: usize, b: usize, c: usize, d: usize, x: u64, y: u64) {
     v[a] = v[a].wrapping_add(v[b]).wrapping_add(x);
@@ -53,11 +53,11 @@ fn round(i: u32, v: &mut [u64; 16], m: &[u64]) {
     g(v, 3, 4, 9, 14, m[s[14]], m[s[15]]);
 }
 
-pub fn contract(input: &[u8]) -> PrecompileResult {
+fn contract(input: &[u8]) -> Vec<u8> {
     msg!("blake2f");
     if input.len() != BLAKE2_INPUT_LEN {
         msg!("input length for BLAKE2 F precompile should be exactly 213 bytes");
-        return PrecompileResult::new();
+        return Vec::new();
     }
 
     let (rounds, rest) = input.split_at(4);
@@ -121,10 +121,9 @@ mod test {
     // Test cases are from https://github.com/ethereum/EIPs/blob/master/EIPS/eip-152.md
 
     use crate::precompile::blake2f::contract;
-    use crate::precompile::PrecompileResult;
     use hex;
 
-    fn test_case(input_hex: &str, expected_result: PrecompileResult) {
+    fn test_case(input_hex: &str, expected_result: Vec<u8>) {
         assert_eq!(
             contract(hex::decode(input_hex).unwrap().as_slice()),
             expected_result
@@ -141,7 +140,7 @@ mod test {
             000000000000000000000000000000000000000000000000000000000000000\
             000000000000000000000000000000000000000000000000000000000000000\
             000000000000300000000000000000000000000000001",
-            PrecompileResult::new(),
+            Vec::new(),
         )
     }
 
@@ -156,7 +155,7 @@ mod test {
             0000000000000000000000000000000000000000000000000000000000000000\
             0000000000000000000000000000000000000000000000000000000000000000\
             000300000000000000000000000000000001",
-            PrecompileResult::new(),
+            Vec::new(),
         )
     }
 
@@ -171,7 +170,7 @@ mod test {
             0000000000000000000000000000000000000000000000000000000000000000\
             0000000000000000000000000000000000000000000000000000000000000000\
             0300000000000000000000000000000002",
-            PrecompileResult::new(),
+            Vec::new(),
         )
     }
 

@@ -75,7 +75,7 @@ impl AccountLock for ContextAtomic<'_, '_> {
         for (key, item) in accounts.iter() {
             let mut bind = (*key, item.account.clone());
             let mut info = bind.into_account_info();
-            info.is_writable = item.writable;
+            info.is_writable = item.account.writeable;
 
             if Lock::is_managed(&info, self.state.program_id)? && info.is_writable {
                 let lock = Lock::from_account_mut(&info)?;

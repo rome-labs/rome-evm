@@ -197,7 +197,8 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
         let keys = self.storage_keys(&self.merged_slots)?;
 
         for (key, (seed, count, address)) in keys.iter() {
-            if self.state.syscalls() >= NUMBER_ALLOC_DIFF_PER_TX || self.state.alloc_limit() < 500 {
+            let base = self.state.base();
+            if base.syscall.count() >= NUMBER_ALLOC_DIFF_PER_TX || base.alloc_limit() < 500 {
                 return Ok(false);
             }
 
@@ -235,7 +236,7 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
 
         for (address, set) in merged_slots.iter() {
             for slot in set {
-                let (key, seed, _) = self.state.slot_to_key(address, slot);
+                let (key, seed, _) = self.state.base().slot_to_key(address, slot);
                 keys_new_slots
                     .entry(key)
                     .and_modify(|(_, len, _)| *len += 1)

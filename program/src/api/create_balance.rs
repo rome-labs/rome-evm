@@ -28,8 +28,7 @@ pub fn create_balance<'a>(
 
     let state = State::new(program_id, accounts, chain)?;
     let owner_info = state.info_owner_reg(false)?;
-    let signer = state.signer()?;
-    let owner = get_onwer_mut(owner_info, signer.key, chain)?;
+    let owner = get_onwer_mut(owner_info, state.signer.key, chain)?;
     let info = state.info_addr(&address, true)?;
     mint_balance(&state, info, owner, balance, address, chain)
 }
@@ -76,7 +75,7 @@ pub fn mint_balance<T: Origin>(
         )));
     }
 
-    if state.allocated() == 0 {
+    if state.base().alloc() == 0 {
         return Err(AccountInitialized(*info.key));
     }
     let mut account_state = AccountState::from_account_mut(info)?;

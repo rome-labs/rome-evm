@@ -66,11 +66,10 @@ pub fn reg_owner<'a>(
     let (key, chain) = args(data)?;
     msg!("Instruction: register owner {} of chain {}", key, chain);
 
-    let state = State::new_unchecked(program_id, accounts, chain);
-    let signer = state.signer()?;
+    let state = State::new_unchecked(program_id, accounts, chain)?;
     let info = state.info_owner_reg(true)?;
 
-    check(info, signer.key, chain)?;
+    check(info, state.signer.key, chain)?;
     state.realloc(info, info.data_len() + size_of::<OwnerInfo>())?;
     reg(info, key, chain)
 }

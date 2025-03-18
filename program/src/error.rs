@@ -53,6 +53,9 @@ pub enum RomeProgramError {
     #[error("User does not have sufficient funds: {0} {0}")]
     InsufficientFunds(H160, U256),
 
+    #[error("Payer does not have sufficient SOL: {0}")]
+    InsufficientSOLs(Pubkey),
+
     #[error("RLP Decored error: {0}")]
     RlpDecoderError(#[from] DecoderError),
 
@@ -86,11 +89,11 @@ pub enum RomeProgramError {
     #[error("An solana Pubkey error: {0}")]
     PubkeyError(#[from] PubkeyError),
 
-    #[error("system account not found: {0}")]
-    SystemAccountNotFound(Pubkey),
+    #[error("account not found: {0}")]
+    AccountNotFound(Pubkey),
 
     #[error("PDA account not found: {0} account type {1:?}")]
-    AccountNotFound(Pubkey, AccountType),
+    PdaAccountNotFound(Pubkey, AccountType),
 
     #[error("attempt to init an initialized account: {0}")]
     AccountInitialized(Pubkey),
@@ -100,6 +103,9 @@ pub enum RomeProgramError {
 
     #[error("Invalid instruction data")]
     InvalidInstructionData,
+
+    #[error("Invalid non-EVM instruction data")]
+    InvalidNonEvmInstructionData,
 
     #[cfg(not(target_os = "solana"))]
     #[error("rpc client error {0:?}")]
@@ -144,6 +150,30 @@ pub enum RomeProgramError {
 
     #[error("Unregistered chain_id: {0} ")]
     UnregisteredChainId(u64),
+
+    #[error("attempt to create an existing account: {0}")]
+    AccountAlreadyExists(Pubkey),
+
+    #[error("attempt to allocate an existing account: {0}")]
+    AccountAlreadyInUse(Pubkey),
+
+    #[error("Program modified the data of an account that doesn't belong to it: {0}")]
+    ExternalAccountDataModified(Pubkey),
+
+    #[error("attempt to transfer SOL from account with non-empty data: {0}")]
+    TransferFromAccountWithData(Pubkey),
+
+    #[error("Provided and calculated accounts mismatch: {0} {1}")]
+    AccountsMismatch(Pubkey, Pubkey),
+
+    #[error("Attempt to modity read-only account: {0}")]
+    ModifyReadOnlyAccount(Pubkey),
+
+    #[error("Invalid non-evm authority account: {0}")]
+    InvalidAuthority(Pubkey),
+
+    #[error("Inconsistent account list")]
+    InconsistentAccountList,
 }
 
 impl From<ProgramError> for RomeProgramError {

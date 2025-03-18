@@ -1,4 +1,6 @@
 pub mod allocate;
+pub mod aux;
+pub mod base;
 pub mod handler;
 pub mod info;
 mod journal;
@@ -9,6 +11,8 @@ pub mod pda;
 mod state;
 
 pub use allocate::*;
+pub use aux::Account;
+pub use base::*;
 pub use journal::*;
 pub use journaled_state::*;
 pub use state::*;

@@ -33,8 +33,8 @@ pub fn create_balance<'a>(
     let info = bind.into_account_info();
     mint_balance(&state, &info, owner, balance, address, chain)?;
 
-    state.update(bind)?;
-    state.update(owners)?;
+    state.update(bind);
+    state.update(owners);
 
     Emulation::without_vm(&state)
 }

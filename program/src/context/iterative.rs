@@ -116,7 +116,7 @@ pub fn serialize_impl<T: Origin + Allocate, B: Origin, L: AccountLock + Context>
     vm.handler.serialize(&mut into)?;
     vm.return_value.serialize(&mut into)?;
     vm.exit_reason.serialize(&mut into)?;
-    state.serialize_pda(&mut into)
+    state.base().pda.serialize(&mut into)
 }
 
 pub fn deserialize_impl<T: Origin + Allocate, B: Origin, L: AccountLock + Context>(
@@ -130,5 +130,5 @@ pub fn deserialize_impl<T: Origin + Allocate, B: Origin, L: AccountLock + Contex
     vm.handler = JournaledState::deserialize(&mut bin, vm.handler.state)?;
     vm.return_value = BorshDeserialize::deserialize(&mut bin)?;
     vm.exit_reason = BorshDeserialize::deserialize(&mut bin)?;
-    state.deserialize_pda(&mut bin)
+    state.base().pda.deserialize(&mut bin)
 }

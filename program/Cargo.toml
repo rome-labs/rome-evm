@@ -18,6 +18,8 @@ thiserror = { workspace = true }
 hex = { workspace = true }
 borsh = { version = "1.5.3", features = ["derive", "unstable__schema"] }
 ripemd = { workspace = true }
+spl-token = { workspace = true }
+spl-associated-token-account = { workspace = true }
 
 [target.'cfg(not(target_os = "solana"))'.dependencies]
 solana-client = { workspace = true }

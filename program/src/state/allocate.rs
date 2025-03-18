@@ -1,5 +1,5 @@
 use {
-    super::{origin::Origin, State},
+    super::State,
     crate::{
         context::account_lock::AccountLock,
         error::{Result, RomeProgramError::*},

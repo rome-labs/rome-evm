@@ -10,6 +10,7 @@ pub mod precompile;
 pub mod state;
 pub mod tx;
 pub mod vm;
+pub mod non_evm;
 
 pub use accounts::*;
 use api::*;

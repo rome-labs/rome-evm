@@ -1,11 +1,16 @@
 use {
-    super::{precompiled_contract, JournaledState},
-    crate::{origin::Origin, precompile::built_in_contract, state::Allocate, state::Diff},
+    super::{aux::Ix, precompiled_contract, JournaledState},
+    crate::{
+        origin::Origin,
+        precompile::{ non_evm_program,},
+        state::{Allocate, Diff},
+        non_evm::Program, aux::revert_msg,
+    },
     evm::{
         Capture, Context, CreateScheme, ExitError, ExitReason, Handler, Machine, Opcode, Stack,
-        Transfer, H160, H256, U256,
+        Transfer, H160, H256, U256, ExitSucceed::Returned, ExitRevert::Reverted,
     },
-    solana_program::keccak::hash,
+    solana_program::{keccak::hash, },
     std::convert::Infallible,
 };
 
@@ -130,13 +135,12 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
     fn block_difficulty(&self) -> U256 {
         U256::zero()
     }
-
     fn block_gas_limit(&self) -> U256 {
         U256::max_value()
     }
 
     fn chain_id(&self) -> U256 {
-        U256::from(self.state.chain_id())
+        U256::from(self.state.base().chain)
     }
 
     fn set_storage(&mut self, address: H160, index: U256, value: U256) -> Result<(), ExitError> {
@@ -206,8 +210,6 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
             return Capture::Exit((ExitReason::Error(ExitError::OutOfFund), None, vec![]));
         }
 
-        self.journal.get_mut(&caller).push(Diff::NonceChange);
-
         let new_addres = self.build_address(scheme);
         self.journal.get_mut(&caller).push(Diff::NonceChange);
 
@@ -261,10 +263,17 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
             }
         }
 
-        if let Some(f) = built_in_contract(&code_address) {
-            let return_value = f(&input);
-            let ok = ExitReason::Succeed(evm::ExitSucceed::Returned);
-            return Capture::Exit((ok, return_value));
+        if let Some(program) =  non_evm_program(&code_address, self.state) {
+            let (reason, value) = if program.found_eth_call(&input) {
+                match program.eth_call(&input) {
+                    Ok(val) => (ExitReason::Succeed(Returned), val),
+                    Err(e) =>
+                        (ExitReason::Revert(Reverted), revert_msg(e.to_string()))
+                }
+            } else {
+                self.non_evm_invoke(&code_address, &transfer, &input, is_static, &context, program)
+            };
+            return Capture::Exit((reason, value))
         }
 
         let call = CallInterrupt {
@@ -318,5 +327,55 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
             .get_mut(&address)
             .push(Diff::TStorageChange { key: index, value });
         Ok(())
+    }
+}
+
+impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
+    pub fn non_evm_invoke(
+        &mut self,
+        _code_address: &H160,
+        transfer: &Option<Transfer>,
+        input: &[u8],
+        is_static: bool,
+        context: &Context,
+        program: Box<dyn Program + 'a>,
+    ) -> (ExitReason, Vec<u8>) {
+
+        if is_static {
+            return (Reverted.into(), revert_msg("StaticModeViolation".to_string()))
+        }
+
+        // TODO: uncomment, security issue !
+        // if context.address != *code_address {
+        //     return (Reverted.into(), revert_msg("DelegateCallProhibited".to_string()))
+        // }
+
+        if let Some(transfer) = transfer {
+            if !transfer.value.is_zero() {
+                return (Reverted.into(), revert_msg("TransferProhibited".to_string()))
+            }
+        }
+
+        let (ix, seed) = match program.ix_from_abi(input, context.caller) {
+            Ok(x) => x,
+            Err(e) => return (Reverted.into(), revert_msg(e.to_string()))
+        };
+
+        let non_evm_state = self.journal.non_evm_state();
+
+        let binds = match non_evm_state.ix_accounts_mut(self.state, &ix) {
+            Ok(binds) => binds,
+            Err(e) => return (Reverted.into(), revert_msg(e.to_string()))
+        };
+
+        let return_value = match program.emulate(&ix, binds) {
+            Ok(x) => x,
+            Err(e) => return (Reverted.into(), revert_msg(e.to_string()))
+        };
+
+        let ixs = self.journal.non_evm_ix.get_or_insert(vec![]);
+        ixs.push(Ix::new(ix, seed));
+
+        (ExitReason::Succeed(Returned), return_value)
     }
 }

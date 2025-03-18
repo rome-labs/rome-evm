@@ -37,7 +37,6 @@ use {
     rome_evm::{
         accounts::{AccountState, AccountType, Data},
         error::{Result, RomeProgramError::*},
-        state::origin::Origin,
         ExitReason, H160, SIG_VERIFY_COST,
     },
     solana_program::{
@@ -57,10 +56,10 @@ pub struct Emulation {
     pub accounts: BTreeMap<Pubkey, Item>,
     pub storage: BTreeMap<H160, Slots>,
     pub vm: Option<Vm>,
-    pub allocated: usize,
-    pub deallocated: usize,
-    pub allocated_state: usize,
-    pub deallocated_state: usize,
+    pub alloc: usize,
+    pub dealloc: usize,
+    pub alloc_payed: usize,
+    pub dealloc_payed: usize,
     pub gas: u64,
     pub lock_overrides: Vec<u8>,
     pub syscalls: u64,
@@ -77,8 +76,8 @@ impl Emulation {
         iter_count: u64,
         alloc: usize,
         dealloc: usize,
-        alloc_state: usize,
-        dealloc_state: usize,
+        alloc_payed: usize,
+        dealloc_payed: usize,
         lock_overrides: Vec<Pubkey>,
         syscalls: u64,
     ) -> Result<Self> {
@@ -86,7 +85,7 @@ impl Emulation {
             && alloc <= MAX_PERMITTED_DATA_INCREASE
             && syscalls < 64;
 
-        let gas = Emulation::gas(alloc_state, dealloc_state, iter_count, is_atomic)?;
+        let gas = Emulation::gas(alloc_payed, dealloc_payed, iter_count, is_atomic)?;
 
         let lock_overrides = Emulation::cast_overrides(state, lock_overrides)?;
 
@@ -95,8 +94,8 @@ impl Emulation {
         msg!("nubmer of iterations: {}", iter_count);
         msg!("allocated: {}", alloc);
         msg!("deallocated: {}", dealloc);
-        msg!("allocated_state: {}", alloc_state);
-        msg!("deallocated_state: {}", dealloc_state);
+        msg!("allocated_payed: {}", alloc_payed);
+        msg!("deallocated_payed: {}", dealloc_payed);
         msg!("exit_reason: {:?}", exit_reason);
         msg!("gas: {:?}", gas);
         msg!("lock_overrides: {:?}", lock_overrides);
@@ -116,10 +115,10 @@ impl Emulation {
             accounts: state.accounts.borrow().clone(),
             storage: state.storage.borrow().clone(),
             vm: Some(vm),
-            allocated: alloc,
-            deallocated: dealloc,
-            allocated_state: alloc_state,
-            deallocated_state: dealloc_state,
+            alloc,
+            dealloc,
+            alloc_payed,
+            dealloc_payed,
             gas,
             lock_overrides,
             syscalls,
@@ -151,7 +150,7 @@ impl Emulation {
                 msg!(
                     "{} {} {} {} {} {}",
                     key,
-                    item.writable,
+                    item.account.writeable,
                     item.signer,
                     type_,
                     item.account.data.len(),
@@ -161,7 +160,7 @@ impl Emulation {
                 msg!(
                     "{} {} {} {} {}",
                     key,
-                    item.writable,
+                    item.account.writeable,
                     item.signer,
                     type_,
                     item.account.data.len(),
@@ -173,25 +172,28 @@ impl Emulation {
     }
 
     pub fn without_vm(state: &State) -> Result<Self> {
-        let alloc_state = *state.alloc_state.borrow();
-        let dealloc_state = *state.dealloc_state.borrow();
-        let gas = Emulation::gas(alloc_state, dealloc_state, 1, true)?;
+        let alloc = state.alloc();
+        let dealloc = state.dealloc();
+        let alloc_payed = state.alloc_payed();
+        let dealloc_payed = state.dealloc_payed();
+
+        let gas = Emulation::gas(alloc_payed, dealloc_payed, 1, true)?;
 
         msg!(">> emulation results:");
-        msg!("allocated: {}", state.allocated());
-        msg!("deallocated: {}", state.deallocated());
-        msg!("allocated_state: {}", alloc_state);
-        msg!("deallocated_state: {}", dealloc_state);
+        msg!("allocated: {}", alloc);
+        msg!("deallocated: {}", dealloc);
+        msg!("allocated_payed: {}", alloc_payed);
+        msg!("deallocated_payed: {}", dealloc_payed);
         Emulation::log_accounts(state)?;
 
         Ok(Self {
             accounts: state.accounts.borrow().clone(),
             storage: state.storage.borrow().clone(),
             vm: None,
-            allocated: state.allocated(),
-            deallocated: state.deallocated(),
-            allocated_state: alloc_state,
-            deallocated_state: dealloc_state,
+            alloc,
+            dealloc,
+            alloc_payed,
+            dealloc_payed,
             gas,
             lock_overrides: vec![],
             syscalls: state.pda.syscall.count(),
@@ -200,12 +202,12 @@ impl Emulation {
     }
 
     pub fn gas(
-        alloc_state: usize,
-        dealloc_state: usize,
+        alloc_payed: usize,
+        dealloc_payed: usize,
         iter_count: u64,
         is_atomic: bool,
     ) -> Result<u64> {
-        let space_to_pay = alloc_state.saturating_sub(dealloc_state);
+        let space_to_pay = alloc_payed.saturating_sub(dealloc_payed);
 
         let rent = if space_to_pay > 0 {
             Rent::get()?.minimum_balance(space_to_pay)
@@ -219,7 +221,7 @@ impl Emulation {
             SIG_VERIFY_COST * iter_count
         };
 
-        Ok(rent + sig_veify_cost)
+        Ok(21_000.max(rent + sig_veify_cost))
     }
 
     pub fn cast_overrides(state: &State, overrides: Vec<Pubkey>) -> Result<Vec<u8>> {

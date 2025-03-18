@@ -54,7 +54,7 @@ impl Lock {
         Ok(())
     }
     pub fn is_managed(info: &AccountInfo, program_id: &Pubkey) -> Result<bool> {
-        if info.owner == program_id {
+        if AccountType::check_owner(info, program_id).is_ok() {
             let typ = AccountType::from_account(info)?;
             return Ok(*typ == Balance || *typ == Storage);
         }

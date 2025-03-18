@@ -8,7 +8,6 @@ use {
         api::{split_fee, split_u64},
         context::{account_lock::AccountLock, Context},
         error::{Result, RomeProgramError::*},
-        origin::Origin,
         tx::tx::Tx,
         vm::{self, vm_iterative::MachineIterative, Execute},
         H160, H256,
@@ -35,8 +34,8 @@ pub fn iterative_tx<L: AccountLock + Context + LockOverrides>(
     let mut iteration = 0;
     let mut alloc = 0;
     let mut dealloc = 0;
-    let mut alloc_state = 0;
-    let mut dealloc_state = 0;
+    let mut alloc_payed = 0;
+    let mut dealloc_payed = 0;
     let mut syscalls = 0;
 
     // TODO remove and use unique tx_id in data
@@ -61,8 +60,8 @@ pub fn iterative_tx<L: AccountLock + Context + LockOverrides>(
                     iteration - 1, // do not take into account the unnecessary iteration
                     alloc,
                     dealloc,
-                    alloc_state,
-                    dealloc_state,
+                    alloc_payed,
+                    dealloc_payed,
                     vm.context.lock_overrides(),
                     syscalls,
                 );
@@ -71,10 +70,10 @@ pub fn iterative_tx<L: AccountLock + Context + LockOverrides>(
             _ => {}
         }
         steps += vm.steps_executed;
-        alloc += state.allocated();
-        dealloc += state.deallocated();
-        alloc_state += *state.alloc_state.borrow();
-        dealloc_state += *state.dealloc_state.borrow();
+        alloc += state.alloc();
+        dealloc += state.dealloc();
+        alloc_payed += state.alloc_payed();
+        dealloc_payed += state.dealloc_payed();
         syscalls += state.syscall.count();
 
         state.reset();

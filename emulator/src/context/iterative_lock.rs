@@ -40,7 +40,7 @@ pub fn add_ro_lock(state: &State, info: &AccountInfo, state_holder: &Bind) -> Re
         RoLock::add_preallocated(&ro_lock_info, &state_holder.0)?;
     }
     // ro_lock account must be writable so that it can be deallocated during unlock iteration
-    state.update(ro_lock_bind)?;
+    state.update(ro_lock_bind);
     // add ro-lock
     lock.ro_lock()
 }
@@ -75,7 +75,7 @@ pub fn iterative_lock(state: &State, holder: u64) -> Result<Vec<Pubkey>> {
             //     lock_overrides.push(*key);
             // }
             // all accounts must be writable
-            state.update(bind)?;
+            state.update(bind);
         }
     }
 

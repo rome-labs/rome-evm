@@ -4,7 +4,7 @@ use {
         context::account_lock::AccountLock,
         error::{Result, RomeProgramError::*},
         pda::Seed,
-        state::{allocate::Allocate, origin::Origin},
+        state::allocate::Allocate,
         AccountState, AccountType, Code, Data, Slot, Storage, H160,
     },
     solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey},
@@ -44,7 +44,7 @@ impl Allocate for State<'_> {
 
         let new_len = bind.1.data.len() + len;
         self.realloc(&mut bind, new_len)?;
-        self.update(bind)?;
+        self.update(bind);
 
         Ok(diff <= limit)
     }
@@ -74,7 +74,7 @@ impl Allocate for State<'_> {
         };
 
         self.realloc(&mut bind, len)?;
-        self.update(bind)?;
+        self.update(bind);
         msg!("allocate slots {}, diff {}", key, diff);
 
         Ok(diff <= limit)
@@ -101,7 +101,7 @@ impl Allocate for State<'_> {
         };
 
         self.realloc(&mut bind, len)?;
-        self.update(bind)?;
+        self.update(bind);
         msg!("allocate slots {}, diff {}", key, diff);
 
         Ok(())

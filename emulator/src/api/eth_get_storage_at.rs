@@ -1,7 +1,7 @@
 use {
     crate::state::State,
     rome_evm::{
-        error::{Result, RomeProgramError::AccountNotFound},
+        error::{Result, RomeProgramError::PdaAccountNotFound},
         origin::Origin,
         H160, U256,
     },
@@ -22,7 +22,7 @@ pub fn eth_get_storage_at<'a>(
 
     let value = match state.storage(address, slot) {
         Ok(x) => x.unwrap_or(U256::zero()),
-        Err(AccountNotFound(_, _)) => U256::zero(),
+        Err(PdaAccountNotFound(_, _)) => U256::zero(),
         Err(e) => return Err(e),
     };
 
