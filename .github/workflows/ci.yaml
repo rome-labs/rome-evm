@@ -16,7 +16,7 @@ permissions:
 jobs:
   build:
     runs-on:
-      labels: ubuntu-22.04-8core-32gb-300
+      labels: ubuntu-22.04-2core-8gb-75
     steps:
       - name: Install Compose
         uses: ndeloof/install-compose-action@v0.0.1
