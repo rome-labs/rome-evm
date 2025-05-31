@@ -72,6 +72,9 @@ impl Base for Eip1559 {
     fn access_list(&self) -> Option<&AccessList> {
         Some(&self.access_list)
     }
+    fn mint(&self) -> U256 {
+        unreachable!()
+    }
 }
 impl Eip1559 {
     pub fn rlp_at_chain_id(rlp: &rlp::Rlp) -> Result<U256> {

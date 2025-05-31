@@ -1,10 +1,10 @@
 use {
     crate::{
-        context::ContextIterative,
+        context::ContextIt,
         error::Result,
         split_fee, split_hash, split_u64,
         state::State,
-        vm::{vm_iterative::MachineIterative::FromStateHolder, Execute, Vm},
+        vm::{vm_iterative::MachineIt::FromStateHolder, Execute, VmIt},
         Holder,
     },
     evm::{H160, H256},
@@ -34,9 +34,10 @@ pub fn do_tx_holder_iterative<'a>(
     let (session, holder, hash, chain, fee_addr, lock_overrides) = args(data)?;
     let state = State::new(program_id, accounts, chain)?;
     let info = state.info_tx_holder(holder, false)?;
+
     let rlp = Holder::rlp(info, hash, chain)?;
 
-    let context = ContextIterative::new(
+    let context = ContextIt::new(
         &state,
         accounts,
         holder,
@@ -45,7 +46,8 @@ pub fn do_tx_holder_iterative<'a>(
         hash,
         session,
         fee_addr,
+        Some(info)
     )?;
-    let mut vm = Vm::new_iterative(&state, &context)?;
+    let mut vm = VmIt::new(&state, &context)?;
     vm.consume(FromStateHolder)
 }

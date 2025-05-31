@@ -39,10 +39,17 @@ pub fn transmit_tx<'a>(
     let (holder, offset, hash, chain, tx) = args(data)?;
     let state = State::new(program_id, accounts, chain)?;
     let info = state.info_tx_holder(holder, true)?;
-    let to = offset + tx.len();
+    let len = offset + tx.len();
 
-    if TxHolder::from_account(info)?.hash != hash || to > Holder::from_account(info)?.len() {
-        state.realloc(info, Holder::offset(info) + to)?;
+    let reset = TxHolder::from_account(info)?.hash != hash;
+
+    if reset {
+        TxHolder::reset(info, hash)?;
     }
-    Holder::fill(info, hash, offset, to, tx)
+    TxHolder::inc_iteration(info)?;
+
+    if reset || len > Holder::from_account(info)?.len() {
+        state.realloc(info, Holder::offset(info) + len)?;
+    }
+    Holder::fill(info, offset, len, tx)
 }

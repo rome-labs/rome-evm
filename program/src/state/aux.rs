@@ -16,7 +16,7 @@ pub struct Account {
     pub owner: Pubkey,
     pub executable: bool,
     pub rent_epoch: Epoch,
-    pub writeable: bool,
+    pub writable: bool,
 }
 
 impl Account {
@@ -27,14 +27,14 @@ impl Account {
             owner: *info.owner,
             executable: info.executable,
             rent_epoch: info.rent_epoch,
-            writeable: info.is_writable,
+            writable: info.is_writable,
         }
     }
 
     pub fn new_executable() -> Self {
         let mut acc = Self::default();
         acc.executable = true;
-        acc.writeable = false;
+        acc.writable = false;
         acc
     }
 }

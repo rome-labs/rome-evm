@@ -1,7 +1,7 @@
 use {
     super::State,
     crate::{
-        context::account_lock::AccountLock,
+        context::AccountLock,
         error::{Result, RomeProgramError::*},
         pda::Seed,
         AccountState, AccountType, Code, Data, Slot, Storage,

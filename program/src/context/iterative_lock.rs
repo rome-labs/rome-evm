@@ -1,50 +1,16 @@
 use {
-    super::{ContextAtomic, ContextIterative},
+    super::{AccountLock, ContextIt},
     crate::{
-        accounts::{Data, Lock, LockType, RoLock},
-        error::{Result, RomeProgramError::*},
+        error::{Result, RomeProgramError::*, },
+        Data, Lock, LockType, RoLock,
     },
-    solana_program::{account_info::AccountInfo, msg, pubkey::Pubkey},
+    solana_program::{
+        account_info::AccountInfo, pubkey::Pubkey, msg,
+    },
     std::mem::size_of,
 };
 
-pub trait AccountLock {
-    fn lock(&self) -> Result<()>;
-    fn locked(&self) -> Result<bool>;
-    fn unlock(&self) -> Result<()>;
-    fn lock_new_one(&self, info: &AccountInfo) -> Result<()>;
-    fn check_writable(&self, info: &AccountInfo) -> Result<()>;
-}
-
-impl AccountLock for ContextAtomic<'_, '_> {
-    fn lock(&self) -> Result<()> {
-        for &info in self.state.all().values() {
-            // existings locks can only affect writable accounts of the atomic tx
-            if Lock::is_managed(info, self.state.program_id)? && info.is_writable {
-                let lock = Lock::from_account_mut(info)?;
-                if lock.get()?.is_some() {
-                    return Err(AccountLocked(*info.key, lock.lock));
-                }
-            }
-        }
-
-        Ok(())
-    }
-    fn locked(&self) -> Result<bool> {
-        unreachable!()
-    }
-    fn unlock(&self) -> Result<()> {
-        unreachable!()
-    }
-    fn lock_new_one(&self, _info: &AccountInfo) -> Result<()> {
-        unreachable!()
-    }
-    fn check_writable(&self, _info: &AccountInfo) -> Result<()> {
-        Ok(())
-    }
-}
-
-impl AccountLock for ContextIterative<'_, '_> {
+impl AccountLock for ContextIt<'_, '_> {
     fn lock(&self) -> Result<()> {
         assert!(self.origin_accounts.len() <= 256); // ALT supports up to 256 accounts
 

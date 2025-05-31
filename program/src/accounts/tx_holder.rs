@@ -4,21 +4,19 @@ use {
     },
     crate::{
         error::{Result, RomeProgramError::*},
-        Holder,
     },
     evm::H256,
-    solana_program::{account_info::AccountInfo, keccak},
+    solana_program::{account_info::AccountInfo},
     std::{
         cell::{Ref, RefMut},
         mem::size_of,
-        ops::Deref,
     },
 };
 
 #[repr(C, packed)]
 pub struct TxHolder {
     pub hash: H256,
-    reserved: [u8; 9],
+    pub iter_cnt: u16,
 }
 
 impl TxHolder {
@@ -27,16 +25,33 @@ impl TxHolder {
 
         let mut tx_holder = TxHolder::from_account_mut(info)?;
         tx_holder.hash = H256::default();
+        tx_holder.iter_cnt = 0;
+
         Ok(())
     }
-    pub fn check_hash(&self, info: &AccountInfo, ix_hash: H256) -> Result<()> {
-        let tx = Holder::from_account(info)?;
-        let tx_hash = H256::from(keccak::hash(tx.deref()).to_bytes());
-        if self.hash == tx_hash && ix_hash == tx_hash {
+    pub fn check_hash(info: &AccountInfo, ix_hash: H256, rlp_hash: H256) -> Result<()> {
+        let tx_holder = TxHolder::from_account(info)?;
+        if tx_holder.hash == ix_hash && tx_holder.hash == rlp_hash {
             Ok(())
         } else {
             Err(InvalidHolderHash(*info.key))
         }
+    }
+    pub fn reset(info:&AccountInfo, hash: H256) -> Result<()> {
+        let mut tx_holder = TxHolder::from_account_mut(info)?;
+        tx_holder.hash = hash;
+        tx_holder.iter_cnt = 0;
+
+        Ok(())
+    }
+    pub fn inc_iteration(info: &AccountInfo) -> Result<()> {
+        let mut tx_holder = TxHolder::from_account_mut(info)?;
+        tx_holder.iter_cnt = tx_holder
+            .iter_cnt
+            .checked_add(1)
+            .ok_or(CalculationOverflow)?;
+
+        Ok(())
     }
 }
 

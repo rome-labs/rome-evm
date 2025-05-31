@@ -1,40 +1,50 @@
 use {
-    super::LockOverrides,
     crate::state::State,
     rome_evm::{
         context::{
-            account_lock::AccountLock,
             iterative::{deserialize_impl, serialize_impl},
             Context,
         },
-        error::Result,
+        error::{Result, RomeProgramError::*},
         state::{origin::Origin, Allocate},
-        tx::tx::Tx,
-        vm::{vm_iterative::MachineIterative, Vm},
+        tx::{
+            tx::Tx, legacy::Legacy,
+        },
+        vm::Vm,
         Data, Holder, Iterations, StateHolder, H160, H256,
+        api::do_tx_holder::transmit_fee, SIG_VERIFY_COST,
     },
-    solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey},
+    solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey, keccak,},
     std::cell::RefCell,
+    super::TRANSMIT_TX_SIZE,
 };
 
-pub struct ContextIterative<'a, 'b> {
+pub enum Request<'a> {
+    GasEstimate(Legacy),
+    Rlp(&'a[u8]),
+}
+
+pub struct ContextIt<'a, 'b> {
     pub state: &'b State<'a>,
     pub holder: u64,
     pub tx_hash: H256,
     pub lock_overrides: RefCell<Vec<Pubkey>>,
     pub session: u64,
     pub fee_addr: Option<H160>,
-    pub rlp: &'b [u8],
+    // pub rlp: &'b [u8],
+    pub request: Request<'a>,
+    pub with_tx_holder: bool,
 }
 
-impl<'a, 'b> ContextIterative<'a, 'b> {
+impl<'a, 'b> ContextIt<'a, 'b> {
     pub fn new(
         state: &'b State<'a>,
         holder: u64,
         tx_hash: H256,
         session: u64,
         fee_addr: Option<H160>,
-        rlp: &'b [u8],
+        rlp: &'a [u8],
+        with_tx_holder: bool,
     ) -> Result<Self> {
         // allocation affects the vm behaviour.
         // it is important to allocate state_holder before the starting the vm
@@ -48,16 +58,36 @@ impl<'a, 'b> ContextIterative<'a, 'b> {
             lock_overrides: RefCell::new(vec![]),
             session,
             fee_addr,
-            rlp,
+            request: Request::Rlp(rlp),
+            with_tx_holder,
+        })
+    }
+
+    pub fn new_gas_estimate(state: &'b State<'a>, legacy: Legacy) -> Result<Self> {
+        let hash = H256::from(keccak::hash(&[1, 2, 3]).to_bytes());
+        let holder = 0;
+        let _state_holder = state.info_state_holder(holder, true)?;
+        Ok(Self {
+            state,
+            holder,
+            tx_hash: hash,
+            lock_overrides: RefCell::new(vec![]),
+            session: 1, // must not be equal to default value of the StateHolder.session
+            fee_addr: None,
+            request: Request::GasEstimate(legacy),
+            with_tx_holder: true,
         })
     }
 }
 
-impl<'a, 'b> Context for ContextIterative<'a, 'b> {
+impl<'a, 'b> Context for ContextIt<'a, 'b> {
     fn tx(&self) -> Result<Tx> {
-        Tx::from_instruction(self.rlp)
+        match &self.request {
+            Request::Rlp(rlp) => Tx::from_instruction(rlp),
+            Request::GasEstimate(legacy) => Ok(Tx::from_legacy(legacy.clone()))
+        }
     }
-    fn save_iteration(&self, iteration: Iterations) -> Result<()> {
+    fn set_iteration(&self, iteration: Iterations) -> Result<()> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
 
@@ -65,37 +95,30 @@ impl<'a, 'b> Context for ContextIterative<'a, 'b> {
         self.state.update(bind);
         Ok(())
     }
-    fn restore_iteration(&self) -> Result<Iterations> {
+    fn get_iteration(&self) -> Result<Iterations> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
 
         StateHolder::get_iteration(&info)
     }
-    fn serialize<T: Origin + Allocate, L: AccountLock + Context>(
-        &self,
-        vm: &Vm<T, MachineIterative, L>,
-    ) -> Result<()> {
+    fn serialize<T: Origin + Allocate>(&self, vm: &Vm<T>) -> Result<()> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
 
-        serialize_impl(&info, vm, self.state)?;
+        serialize_impl(&info, vm)?;
         self.state.update(bind);
         Ok(())
     }
-    fn deserialize<T: Origin + Allocate, L: AccountLock + Context>(
-        &self,
-        vm: &mut Vm<T, MachineIterative, L>,
-    ) -> Result<()> {
+    fn deserialize<T: Origin + Allocate>(&self, vm: &mut Vm<T>) -> Result<()> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
 
-        deserialize_impl(&info, vm, self.state)
+        deserialize_impl(&info, vm)
     }
     fn allocate_holder(&self) -> Result<()> {
-        let mut bind = self.state.info_state_holder(self.holder, false)?;
+        let bind = self.state.info_state_holder(self.holder, false)?;
         let len = bind.1.data.len() + self.state.alloc_limit();
-        self.state.realloc(&mut bind, len)?;
-        self.state.update(bind);
+        self.state.realloc(&bind.0, len)?;
         Ok(())
     }
 
@@ -103,15 +126,36 @@ impl<'a, 'b> Context for ContextIterative<'a, 'b> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
 
-        StateHolder::set_link(&info, self.tx_hash, self.session)?;
+        StateHolder::set_session(&info, self.tx_hash, self.session)?;
         self.state.update(bind);
+
+        if self.with_tx_holder {
+            let fee = match &self.request {
+                Request::GasEstimate(legacy) => {    // gas_estimate request
+                    if let Some(data) = legacy.data.as_ref() {
+                        let cnt = data.len() as u64 / TRANSMIT_TX_SIZE + 1;
+                        SIG_VERIFY_COST.checked_mul(cnt).ok_or(CalculationOverflow)?
+                    } else {
+                        0
+                    }
+                },
+                Request::Rlp(_) => {
+                    let mut bind = self.state.info_tx_holder(self.holder, false)?;
+                    let info = bind.into_account_info();
+                    transmit_fee(&info)?
+                }
+            };
+            
+            self.collect_fees(fee, 0)?;
+        }
+
         Ok(())
     }
 
-    fn exists_session(&self) -> Result<bool> {
+    fn has_session(&self) -> Result<bool> {
         let mut bind = self.state.info_state_holder(self.holder, false)?;
         let info = bind.into_account_info();
-        StateHolder::is_linked(&info, self.tx_hash, self.session)
+        StateHolder::has_session(&info, self.tx_hash, self.session)
     }
 
     fn tx_hash(&self) -> H256 {
@@ -127,10 +171,26 @@ impl<'a, 'b> Context for ContextIterative<'a, 'b> {
         let info = bind.into_account_info();
         Ok(Holder::size(&info))
     }
-}
 
-impl<'a, 'b> LockOverrides for ContextIterative<'a, 'b> {
-    fn lock_overrides(&self) -> Vec<Pubkey> {
-        self.lock_overrides.borrow().clone()
+    fn fees(&self) -> Result<(u64, u64)> {
+        let mut bind = self.state.info_state_holder(self.holder, false)?;
+        let info = bind.into_account_info();
+        StateHolder::fees(&info)
     }
+
+    fn collect_fees(&self, lmp_fee: u64, lmp_refund: u64) -> Result<()> {
+        let mut bind = self.state.info_state_holder(self.holder, false)?;
+        let info = bind.into_account_info();
+
+        StateHolder::collect_fees(&info, lmp_fee, lmp_refund)?;
+        self.state.update(bind);
+        Ok(())
+    }
+    fn is_gas_estimate(&self) -> bool {
+        match self.request {
+            Request::Rlp(_) => false,
+            _ => true
+        }
+    }
+
 }

@@ -10,10 +10,11 @@ use {
     std::ops::{Deref, DerefMut},
 };
 
-enum TxType<'a> {
+pub enum TxType<'a> {
     Legacy(Rlp<'a>),
     Eip2930(Rlp<'a>),
     Eip1559(Rlp<'a>),
+    Deposit(Rlp<'a>),
 }
 
 pub struct Tx {
@@ -38,9 +39,8 @@ impl Tx {
         Self { tx: Box::new(tx) }
     }
 
-    fn tx_type(data: &[u8]) -> Result<TxType> {
+    pub fn tx_type(data: &[u8]) -> Result<TxType> {
         let rlp = Rlp::new(data);
-
         if rlp.is_list() {
             Ok(TxType::Legacy(rlp))
         } else {
@@ -63,6 +63,7 @@ impl Tx {
             match first {
                 0x01 => Ok(TxType::Eip2930(rlp)),
                 0x02 => Ok(TxType::Eip1559(rlp)),
+                0x7e => Ok(TxType::Deposit(rlp)),
                 _ => Err(Custom(format!("RLP: invalid tx type {first}"))),
             }
         }
@@ -83,7 +84,8 @@ impl Tx {
             TxType::Eip1559(rlp) => {
                 let eip1559 = Eip1559::from_rlp(&rlp)?;
                 (Box::new(eip1559), rlp)
-            }
+            },
+            TxType::Deposit(_) => return Err(IncorrectRlpType)
         };
 
         let from = Tx::recovery_from(&*tx, &rlp)?;
@@ -99,6 +101,7 @@ impl Tx {
             TxType::Legacy(rlp) => Legacy::rlp_at_chain_id(&rlp)?,
             TxType::Eip2930(rlp) => Eip2930::rlp_at_chain_id(&rlp)?,
             TxType::Eip1559(rlp) => Eip1559::rlp_at_chain_id(&rlp)?,
+            TxType::Deposit(_) => return Err(IncorrectRlpType),
         };
 
         Ok(chain.as_u64())

@@ -1,5 +1,5 @@
 mod confirm_tx_iterative;
-mod create_balance;
+mod deposit;
 mod do_tx;
 pub mod do_tx_holder;
 pub mod do_tx_holder_iterative;
@@ -15,7 +15,7 @@ mod reg_owner;
 mod transmit_tx;
 
 pub use confirm_tx_iterative::confirm_tx_iterative;
-pub use create_balance::create_balance;
+pub use deposit::deposit;
 pub use do_tx::do_tx;
 pub use do_tx_holder::do_tx_holder;
 pub use do_tx_holder_iterative::do_tx_holder_iterative;
@@ -31,16 +31,17 @@ pub use reg_owner::reg_owner;
 use solana_program::entrypoint::MAX_PERMITTED_DATA_INCREASE;
 pub use transmit_tx::transmit_tx;
 
-use rome_evm::NUMBER_OPCODES_PER_TX;
 use {
-    crate::state::{Item, Slots, State},
+    crate::{
+        state::{Item, Slots, State}, context::ContextIt,
+    },
     rome_evm::{
         accounts::{AccountState, AccountType, Data},
         error::{Result, RomeProgramError::*},
-        ExitReason, H160, SIG_VERIFY_COST,
+        ExitReason, H160, SIG_VERIFY_COST, NUMBER_OPCODES_PER_TX, StateHolder,
     },
     solana_program::{
-        account_info::IntoAccountInfo, msg, pubkey::Pubkey, rent::Rent, sysvar::Sysvar,
+        account_info::IntoAccountInfo, msg, pubkey::Pubkey,
     },
     std::collections::BTreeMap,
 };
@@ -80,26 +81,39 @@ impl Emulation {
         dealloc_payed: usize,
         lock_overrides: Vec<Pubkey>,
         syscalls: u64,
+        lamports_fee: u64,
+        lamports_refund: u64,
+        is_gas_estimate: bool,
+        context: Option<&ContextIt>
     ) -> Result<Self> {
         let is_atomic = steps_executed <= NUMBER_OPCODES_PER_TX
             && alloc <= MAX_PERMITTED_DATA_INCREASE
             && syscalls < 64;
 
-        let gas = Emulation::gas(alloc_payed, dealloc_payed, iter_count, is_atomic)?;
+        let gas = Emulation::gas(
+            state,
+            is_atomic,
+            is_gas_estimate,
+            lamports_fee,
+            lamports_refund,
+            context,
+        )?;
 
         let lock_overrides = Emulation::cast_overrides(state, lock_overrides)?;
 
         msg!(">> emulation results:");
         msg!("steps_executed: {}", steps_executed);
-        msg!("nubmer of iterations: {}", iter_count);
+        msg!("number of iterations: {}", iter_count);
         msg!("allocated: {}", alloc);
         msg!("deallocated: {}", dealloc);
         msg!("allocated_payed: {}", alloc_payed);
         msg!("deallocated_payed: {}", dealloc_payed);
         msg!("exit_reason: {:?}", exit_reason);
-        msg!("gas: {:?}", gas);
         msg!("lock_overrides: {:?}", lock_overrides);
         msg!("syscalls: {}", syscalls);
+        msg!("lamports_fee: {}", lamports_fee);
+        msg!("lamports_refund: {}", lamports_refund);
+        msg!("gas: {:?}", gas);
         msg!("is_atomic: {}", is_atomic);
 
         Emulation::log_accounts(state)?;
@@ -150,7 +164,7 @@ impl Emulation {
                 msg!(
                     "{} {} {} {} {} {}",
                     key,
-                    item.account.writeable,
+                    item.account.writable,
                     item.signer,
                     type_,
                     item.account.data.len(),
@@ -160,7 +174,7 @@ impl Emulation {
                 msg!(
                     "{} {} {} {} {}",
                     key,
-                    item.account.writeable,
+                    item.account.writable,
                     item.signer,
                     type_,
                     item.account.data.len(),
@@ -177,8 +191,6 @@ impl Emulation {
         let alloc_payed = state.alloc_payed();
         let dealloc_payed = state.dealloc_payed();
 
-        let gas = Emulation::gas(alloc_payed, dealloc_payed, 1, true)?;
-
         msg!(">> emulation results:");
         msg!("allocated: {}", alloc);
         msg!("deallocated: {}", dealloc);
@@ -194,34 +206,11 @@ impl Emulation {
             dealloc,
             alloc_payed,
             dealloc_payed,
-            gas,
+            gas: 0,
             lock_overrides: vec![],
             syscalls: state.pda.syscall.count(),
             is_atomic: true,
         })
-    }
-
-    pub fn gas(
-        alloc_payed: usize,
-        dealloc_payed: usize,
-        iter_count: u64,
-        is_atomic: bool,
-    ) -> Result<u64> {
-        let space_to_pay = alloc_payed.saturating_sub(dealloc_payed);
-
-        let rent = if space_to_pay > 0 {
-            Rent::get()?.minimum_balance(space_to_pay)
-        } else {
-            0
-        };
-
-        let sig_veify_cost = if is_atomic {
-            SIG_VERIFY_COST
-        } else {
-            SIG_VERIFY_COST * iter_count
-        };
-
-        Ok(21_000.max(rent + sig_veify_cost))
     }
 
     pub fn cast_overrides(state: &State, overrides: Vec<Pubkey>) -> Result<Vec<u8>> {
@@ -239,6 +228,30 @@ impl Emulation {
                 }
             })
             .collect::<Result<Vec<_>>>()
+    }
+
+    pub fn gas(state: &State, is_atomic: bool, is_gas_estimate: bool, fee: u64, refund: u64, context: Option<&ContextIt>) -> Result<u64> {
+
+        let actual_fee = if is_gas_estimate {
+            let context = context.unwrap();
+
+            if is_atomic {
+                let mut bind = state.info_state_holder(context.holder, false)?;
+                let info = bind.into_account_info();
+
+                let iter_cnt = StateHolder::from_account(&info)?.iter_cnt;
+                let extra_fee = (iter_cnt - 1) * SIG_VERIFY_COST;
+                fee.checked_sub(extra_fee).ok_or(CalculationUnderflow)?
+            } else {
+                fee.checked_add(SIG_VERIFY_COST * 10).ok_or(CalculationOverflow)?
+            }
+        } else {
+            fee
+        };
+
+        let gas = actual_fee.saturating_sub(refund);
+
+        Ok(21_000.max(gas))
     }
 }
 

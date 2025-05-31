@@ -1,15 +1,15 @@
 use {
     super::Emulation,
     crate::{
-        context::{ContextIterative, LockOverrides},
+        context::ContextIt,
         state::State,
     },
     rome_evm::{
         api::{split_fee, split_u64},
-        context::{account_lock::AccountLock, Context},
+        context::{AccountLock, Context},
         error::{Result, RomeProgramError::*},
         tx::tx::Tx,
-        vm::{self, vm_iterative::MachineIterative, Execute},
+        vm::{self, vm_iterative::MachineIt, Execute},
         H160, H256,
     },
     solana_client::rpc_client::RpcClient,
@@ -26,9 +26,10 @@ pub fn args(data: &[u8]) -> Result<(u64, u64, Option<H160>, &[u8])> {
     Ok((session, holder, fee_addr, tx))
 }
 
-pub fn iterative_tx<L: AccountLock + Context + LockOverrides>(
+pub fn iterative_tx(
     state: &State,
-    context: L,
+    context: ContextIt,
+    is_gas_estimate: bool,
 ) -> Result<Emulation> {
     let mut steps = 0;
     let mut iteration = 0;
@@ -42,34 +43,39 @@ pub fn iterative_tx<L: AccountLock + Context + LockOverrides>(
     loop {
         msg!("  iteration {}", iteration);
 
-        let mut vm = vm::Vm::new_iterative(state, &context)?;
+        let mut vm = vm::VmIt::new(state, &context)?;
         iteration += 1;
 
-        match vm.consume(MachineIterative::FromStateHolder) {
+        match vm.consume(MachineIt::FromStateHolder) {
             Err(UnnecessaryIteration(_)) => {
                 msg!("Lock after emulation");
                 vm.context.lock()?;
                 // restore vm state
-                vm.context.deserialize(&mut vm)?;
+                vm.context.deserialize(&mut vm.vm)?;
+                let (lmp_fee, lmp_refund) = vm.context.fees()?;
 
                 return Emulation::with_vm(
                     state,
-                    vm.exit_reason,
-                    vm.return_value,
+                    vm.vm.exit_reason,
+                    vm.vm.return_value,
                     steps,
                     iteration - 1, // do not take into account the unnecessary iteration
                     alloc,
                     dealloc,
                     alloc_payed,
                     dealloc_payed,
-                    vm.context.lock_overrides(),
+                    vm.context.lock_overrides.borrow().clone(),
                     syscalls,
+                    lmp_fee,
+                    lmp_refund,
+                    is_gas_estimate,
+                    Some(&context)
                 );
             }
             Err(e) => return Err(e),
             _ => {}
         }
-        steps += vm.steps_executed;
+        steps += vm.vm.steps_executed;
         alloc += state.alloc();
         dealloc += state.dealloc();
         alloc_payed += state.alloc_payed();
@@ -92,6 +98,6 @@ pub fn do_tx_iterative<'a>(
     let chain = Tx::chain_id_from_rlp(rlp)?;
 
     let state = State::new(program_id, Some(*signer), Arc::clone(&client), chain)?;
-    let context = ContextIterative::new(&state, holder, hash, session, fee_addr, rlp)?;
-    iterative_tx(&state, context)
+    let context = ContextIt::new(&state, holder, hash, session, fee_addr, rlp, false)?;
+    iterative_tx(&state, context, false)
 }

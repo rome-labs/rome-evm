@@ -21,7 +21,7 @@ pub use state::*;
 
 entrypoint! {
     DoTx => do_tx,
-    CreateBalance => create_balance,
+    Deposit => deposit,
     TransmitTx => transmit_tx,
     DoTxHolder => do_tx_holder,
     DoTxIterative => do_tx_iterative,

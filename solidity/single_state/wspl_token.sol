@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity <=0.8.28;
+pragma solidity ^0.8.20;
 
 import "./interface.sol";
 import "./shared.sol";
@@ -24,20 +24,22 @@ contract WSplToken  is Shared{
         return string(b58);
     }
 
-    function transfer(bytes32 from, bytes32 to, uint64 amount) public {
-        ISplToken.Seed[] memory seeds = new ISplToken.Seed[](0);
-        (bool success, bytes memory result) = spl_token_address.delegatecall(
-            abi.encodeWithSignature("transfer(bytes32,bytes32,uint64,(bytes)[])", from, to, amount, seeds)
-        );
+    // DELEGATE CALL IS PROHIBITED FOR UNIFIED LIQUIDITY
 
-        require (success, string(Shared.revert_msg(result)));
-    }
+    // function transfer(bytes32 from, bytes32 to, uint64 amount) public {
+    //     ISplToken.Seed[] memory seeds = new ISplToken.Seed[](0);
+    //     (bool success, bytes memory result) = spl_token_address.delegatecall(
+    //         abi.encodeWithSignature("transfer(bytes32,bytes32,uint64,(bytes)[])", from, to, amount, seeds)
+    //     );
 
-    function transfer(string memory from, string memory to, uint64 amount) public   {
-        bytes32 from_ = SystemProgram.base58_to_bytes32(bytes(from));
-        bytes32 to_ = SystemProgram.base58_to_bytes32(bytes(to));
-        transfer(from_, to_, amount);
-    }
+    //     require (success, string(Shared.revert_msg(result)));
+    // }
+
+    // function transfer(string memory from, string memory to, uint64 amount) public   {
+    //     bytes32 from_ = SystemProgram.base58_to_bytes32(bytes(from));
+    //     bytes32 to_ = SystemProgram.base58_to_bytes32(bytes(to));
+    //     transfer(from_, to_, amount);
+    // }
 
 
     function init_account(string memory acc, string memory mint, string memory owner) public {

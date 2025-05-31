@@ -7,14 +7,16 @@ pub mod entrypoint;
 mod origin;
 mod state;
 mod stubs;
+mod vm_eth_call;
 
 pub use api::*;
 pub use context::*;
 pub use state::{Bind, Item};
+pub use vm_eth_call::*;
 
 entrypoint! {
     DoTx => do_tx,
-    CreateBalance => create_balance,
+    Deposit => deposit,
     TransmitTx => transmit_tx,
     DoTxHolder => do_tx_holder,
     DoTxIterative => do_tx_iterative,

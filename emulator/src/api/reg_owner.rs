@@ -16,22 +16,28 @@ pub fn reg_owner<'a>(
     signer: &'a Pubkey,
     client: Arc<RpcClient>,
 ) -> Result<Emulation> {
-    let (key, chain) = args(data)?;
-    msg!("Instruction: register owner {} of chain {}", key, chain);
+    let chain = args(data)?;
+    msg!("Instruction: chain_id registration {}", chain);
 
     let state = State::new_unchecked(program_id, Some(*signer), client, chain)?;
-    let mut bind = state.info_owner_reg(true)?;
-    {
+
+    let (len, key) = {
+        let mut bind = state.info_owner_reg(true)?;
         let info = bind.into_account_info();
         check(&info, signer, chain)?;
-    }
-    let len = bind.1.data.len() + size_of::<OwnerInfo>();
-    state.realloc(&mut bind, len)?;
-    {
-        let info = bind.into_account_info();
-        reg(&info, key, chain)?;
-    }
+        let len = bind.1.data.len() + size_of::<OwnerInfo>();
+        (len, bind.0)
+    };
+
+    state.realloc(&key, len)?;
+
+    let mut bind = state.info_owner_reg(false)?;
+    let info = bind.into_account_info();
+    reg(&info, chain)?;
     state.update(bind);
+
+    // create rome-evm SOL wallet
+    let _ = state.info_sol_wallet(true)?;
 
     Emulation::without_vm(&state)
 }

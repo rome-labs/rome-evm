@@ -1,5 +1,5 @@
 use {
-    super::{aux::Ix, precompiled_contract, JournaledState},
+    super::{aux::Ix, JournaledState},
     crate::{
         origin::Origin,
         precompile::{ non_evm_program,},
@@ -48,15 +48,25 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
     }
 
     fn balance(&self, address: H160) -> U256 {
-        let debet = self.journal.transfer_from(&address);
-        let credit = self.journal.transfer_to(&address);
-        let base = self.state.balance(&address).unwrap_or(U256::zero());
+        let debet = self.journal.transfer_from(&address)
+            .expect(&format!("Calculation overflow {}", &address));
+        
+        let credit = self.journal.transfer_to(&address)
+        .expect(&format!("Calculation overflow {}", &address));
+        
+        let mut base = self.state.balance(&address).unwrap_or(U256::zero());
 
-        base + credit - debet
+        base = base.checked_add(credit)
+            .expect(&format!("Calculation overflow {}", &address));
+        
+        base = base.checked_sub(debet)
+            .expect(&format!("Calculation underflow {}", &address));
+        
+        base
     }
 
     fn code_size(&self, address: H160) -> U256 {
-        if precompiled_contract(address) {
+        if non_evm_program(&address, self.state).is_some() {
             U256::one()
         } else {
             if let Some((code, _)) = self.journal.code_valids_diff(&address) {
@@ -171,19 +181,18 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
         }
 
         let value = self.balance(address);
-
-        self.transfer(&address, &target, &value)
-            .map_err(|_| ExitError::OutOfFund)?;
+        self.transfer(&address, &target, &value);
 
         if !self.code_size(address).is_zero() {
-            let onchain_code_size = if precompiled_contract(address) {
-                1
-            } else {
-                self.state.code(&address).map_or(0, |vec| vec.len())
-            };
+            if non_evm_program(&address, self.state).is_none() {
+                let onchain_code_size = self
+                    .state
+                    .code(&address)
+                    .map_or(0, |vec| vec.len());
 
-            if onchain_code_size == 0 {
-                self.journal.selfdestruct(&address)
+                if onchain_code_size == 0 {
+                    self.journal.selfdestruct(&address)
+                }
             }
         }
 
@@ -205,35 +214,37 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
                 vec![],
             ));
         }
-
         if !value.is_zero() && self.balance(caller) < value {
             return Capture::Exit((ExitReason::Error(ExitError::OutOfFund), None, vec![]));
         }
+        let new_addr = self.build_address(scheme);
 
-        let new_addres = self.build_address(scheme);
-        self.journal.get_mut(&caller).push(Diff::NonceChange);
-
-        if new_addres.is_err() {
-            return Capture::Exit((ExitReason::Error(ExitError::CreateCollision), None, vec![]));
+        if new_addr.is_err() {
+            let res = (ExitReason::Revert(Reverted), None,  revert_msg("CreateCollision".to_string()));
+            return Capture::Exit(res);
         }
-        let new_addres = new_addres.unwrap();
+        let new_addr = new_addr.unwrap();
 
         let context = evm::Context {
-            address: new_addres,
+            address: new_addr,
             caller,
             apparent_value: value,
         };
 
-        let transfer = Some(Transfer {
-            source: caller,
-            target: new_addres,
-            value,
-        });
+        let transfer = if value.is_zero() {
+            None
+        } else {
+            Some(Transfer {
+                source: caller,
+                target: new_addr,
+                value,
+            })
+        };
 
         let create = CreateInterrupt {
             context,
             transfer,
-            address: new_addres,
+            address: new_addr,
             init_code,
         };
 
@@ -249,30 +260,25 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
         is_static: bool,
         context: Context,
     ) -> Capture<(ExitReason, Vec<u8>), Self::CallInterrupt> {
-        if !self.mutable || is_static {
-            if let Some(transfer) = transfer {
-                if !transfer.value.is_zero() {
-                    return Capture::Exit((
-                        ExitReason::Error(ExitError::StaticModeViolation),
-                        vec![],
-                    ));
-                }
-                if self.balance(transfer.source) < transfer.value {
-                    return Capture::Exit((ExitReason::Error(ExitError::OutOfFund), vec![]));
-                }
+
+        let static_call = !self.mutable || is_static;
+
+        if let Some(transfer) = transfer.as_ref() {
+            if !transfer.value.is_zero() && static_call {
+                return Capture::Exit((
+                    ExitReason::Error(ExitError::StaticModeViolation),
+                    vec![],
+                ));
+            }
+
+            if self.balance(transfer.source) < transfer.value {
+                return Capture::Exit((ExitReason::Error(ExitError::OutOfFund), vec![]));
             }
         }
 
         if let Some(program) =  non_evm_program(&code_address, self.state) {
-            let (reason, value) = if program.found_eth_call(&input) {
-                match program.eth_call(&input) {
-                    Ok(val) => (ExitReason::Succeed(Returned), val),
-                    Err(e) =>
-                        (ExitReason::Revert(Reverted), revert_msg(e.to_string()))
-                }
-            } else {
-                self.non_evm_invoke(&code_address, &transfer, &input, is_static, &context, program)
-            };
+            let (reason, value) =
+                self.non_evm_call(program, &code_address, &transfer, &input, static_call, &context);
             return Capture::Exit((reason, value))
         }
 
@@ -280,7 +286,7 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
             code_address,
             transfer,
             input,
-            is_static,
+            is_static: static_call,
             context,
         };
 
@@ -331,9 +337,46 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
 }
 
 impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
-    pub fn non_evm_invoke(
+    pub fn non_evm_call(
         &mut self,
-        _code_address: &H160,
+        program: Box<dyn Program + 'a>,
+        code_address: &H160,
+        transfer: &Option<Transfer>,
+        input: &[u8],
+        static_call: bool,
+        context: &Context,
+    ) -> (ExitReason, Vec<u8>) {
+
+        // TODO: exclude a creation of a new_page for eth_call.
+        // Currently it is necessary to save the origin's NonceInc
+        // in case of a call without snapshot
+        self.new_page();
+
+        let (reason, val) = if program.found_eth_call(&input) {
+            // TODO: no need to clone the non_evm_state for eth_call
+            let non_evm_state = self.journal.non_evm_state();
+
+            match program.eth_call(input, non_evm_state) {
+                Ok(val) => (ExitReason::Succeed(Returned), val),
+                Err(e) => (ExitReason::Revert(Reverted), revert_msg(e.to_string()))
+            }
+        } else {
+            self.non_evm_tx(code_address, transfer, input, static_call, context, program)
+        };
+
+        if !reason.is_succeed() {
+            self.revert_page()
+        } else {
+            // TODO: overwrite the previous non-evm-state instead of saving the new one
+            self.journal.merge_page();
+        }
+
+        (reason, val)
+    }
+
+    pub fn non_evm_tx(
+        &mut self,
+        code_address: &H160,
         transfer: &Option<Transfer>,
         input: &[u8],
         is_static: bool,
@@ -345,18 +388,17 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
             return (Reverted.into(), revert_msg("StaticModeViolation".to_string()))
         }
 
-        // TODO: uncomment, security issue !
-        // if context.address != *code_address {
-        //     return (Reverted.into(), revert_msg("DelegateCallProhibited".to_string()))
-        // }
+        if context.address != *code_address {
+            return (Reverted.into(), revert_msg("DelegateCallProhibited".to_string()))
+        }
 
         if let Some(transfer) = transfer {
-            if !transfer.value.is_zero() {
+            if !transfer.value.is_zero() && !program.transfer_allowed() {
                 return (Reverted.into(), revert_msg("TransferProhibited".to_string()))
             }
         }
 
-        let (ix, seed) = match program.ix_from_abi(input, context.caller) {
+        let (ix, seed, evm_diff) = match program.ix_from_abi(input, context) {
             Ok(x) => x,
             Err(e) => return (Reverted.into(), revert_msg(e.to_string()))
         };
@@ -368,14 +410,18 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
             Err(e) => return (Reverted.into(), revert_msg(e.to_string()))
         };
 
-        let return_value = match program.emulate(&ix, binds) {
+        match program.emulate(&ix, binds) {
             Ok(x) => x,
             Err(e) => return (Reverted.into(), revert_msg(e.to_string()))
         };
 
+        for (addr, diff) in evm_diff {
+            self.journal.get_mut(&addr).push(diff);
+        }
+
         let ixs = self.journal.non_evm_ix.get_or_insert(vec![]);
         ixs.push(Ix::new(ix, seed));
 
-        (ExitReason::Succeed(Returned), return_value)
+        (ExitReason::Succeed(Returned), vec![])
     }
 }

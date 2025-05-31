@@ -1,24 +1,25 @@
-use solana_program::pubkey::Pubkey;
 use {
-    crate::{context::ContextIterative, state::State, Bind},
+    crate::{context::ContextIt, state::State, Bind},
     rome_evm::{
         accounts::{Data, Lock, LockType, RoLock},
-        context::account_lock::AccountLock,
+        context::AccountLock,
         error::{Result, RomeProgramError::*},
     },
-    solana_program::account_info::{AccountInfo, IntoAccountInfo},
+    solana_program::{
+        account_info::{AccountInfo, IntoAccountInfo}, pubkey::Pubkey,
+    },
     std::mem::size_of,
 };
 
 #[allow(dead_code)]
 pub fn add_ro_lock(state: &State, info: &AccountInfo, state_holder: &Bind) -> Result<()> {
     let mut lock = Lock::from_account_mut(info)?;
-    let mut ro_lock_bind = state.info_ro_lock(info.key, true)?;
 
     let len = match lock.get()? {
         Some(LockType::Ro) => {
             // allocate ro-lock-info
-            let ro_lock_info = ro_lock_bind.into_account_info();
+            let mut bind = state.info_ro_lock(info.key, true)?;
+            let ro_lock_info = bind.into_account_info();
             if !RoLock::found(&ro_lock_info, &state_holder.0)? {
                 ro_lock_info.data_len() + size_of::<RoLock>()
             } else {
@@ -28,19 +29,21 @@ pub fn add_ro_lock(state: &State, info: &AccountInfo, state_holder: &Bind) -> Re
         Some(LockType::Rw(_)) => return Err(AccountLocked(*info.key, lock.lock)),
         None => {
             // allocate/deallocate ro-lock-info
-            let ro_lock_info = ro_lock_bind.into_account_info();
+            let mut bind = state.info_ro_lock(info.key, true)?;
+            let ro_lock_info = bind.into_account_info();
             RoLock::offset(&ro_lock_info) + size_of::<RoLock>()
         }
     };
 
     // push holder.key to ro-lock-info
     if len > 0 {
-        state.realloc(&mut ro_lock_bind, len)?;
-        let ro_lock_info = ro_lock_bind.into_account_info();
+        state.realloc(info.key, len)?;
+        let mut bind = state.info_ro_lock(info.key, true)?;
+        let ro_lock_info = bind.into_account_info();
         RoLock::add_preallocated(&ro_lock_info, &state_holder.0)?;
+        // ro_lock account must be writable so that it can be deallocated during unlock iteration
+        state.update(bind);
     }
-    // ro_lock account must be writable so that it can be deallocated during unlock iteration
-    state.update(ro_lock_bind);
     // add ro-lock
     lock.ro_lock()
 }
@@ -82,7 +85,7 @@ pub fn iterative_lock(state: &State, holder: u64) -> Result<Vec<Pubkey>> {
     Ok(lock_overrides)
 }
 
-impl AccountLock for ContextIterative<'_, '_> {
+impl AccountLock for ContextIt<'_, '_> {
     fn lock(&self) -> Result<()> {
         let mut lock_overrides = self.lock_overrides.borrow_mut();
         *lock_overrides = iterative_lock(self.state, self.holder)?;

@@ -1,5 +1,5 @@
 use {
-    crate::{accounts::*, STORAGE_LEN},
+    crate::{accounts::*, STORAGE_LEN, RSOL_DECIMALS},
     std::mem::{align_of, size_of},
 };
 
@@ -16,9 +16,9 @@ pub fn asserts() {
     assert_eq!(align_of::<Lock>(), 1);
     assert_eq!(align_of::<RoLock>(), 1);
     assert_eq!(align_of::<OwnerInfo>(), 1);
-    assert_eq!(size_of::<TxHolder>(), size_of::<StateHolder>());
     assert!(STORAGE_LEN <= u8::MAX as usize + 1);
     assert_eq!(align_of::<Ver>(), 1);
     assert_eq!(align_of::<AccountType>(), 1);
     assert_eq!(size_of::<Lock>(), 41);
+    assert!(RSOL_DECIMALS > 9);
 }

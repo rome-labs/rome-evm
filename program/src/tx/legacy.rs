@@ -82,6 +82,9 @@ impl Base for Legacy {
     fn access_list(&self) -> Option<&super::eip2930::AccessList> {
         None
     }
+    fn mint(&self) -> U256 {
+        unreachable!()
+    }
 }
 
 impl Legacy {

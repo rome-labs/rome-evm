@@ -1,7 +1,7 @@
 use {
     super::{Diff, Journal},
     crate::{
-        context::account_lock::AccountLock, error::RomeProgramError::*, error::*, origin::Origin,
+        context::AccountLock, error::RomeProgramError::*, error::*, origin::Origin,
         pda::Seed, state::Allocate, NUMBER_ALLOC_DIFF_PER_TX,
     },
     borsh::{BorshDeserialize, BorshSerialize},
@@ -65,31 +65,21 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
         self.journal = Journal::next_page(Box::new(journal));
     }
 
-    pub fn transfer(&mut self, from: &H160, to: &H160, balance: &U256) -> Result<()> {
+    pub fn transfer(&mut self, from: &H160, to: &H160, balance: &U256){
         if balance.is_zero() {
-            return Ok(());
+            return;
         }
 
-        if self.balance(*from) < *balance {
-            Err(InsufficientFunds(*from, *balance)) // todo: remove this check?
-        } else {
-            self.journal
-                .get_mut(from)
-                .push(Diff::TransferFrom { balance: *balance });
-            self.journal
-                .get_mut(to)
-                .push(Diff::TransferTo { balance: *balance });
-            Ok(())
-        }
+        self.journal.get_mut(from).push(Diff::TransferFrom { balance: *balance });
+        self.journal.get_mut(to).push(Diff::TransferTo { balance: *balance });
     }
 
-    // todo: track the depth
-    pub fn revert_diff(&mut self) {
-        self.journal = if let Some(parent) = self.journal.parent.take() {
-            *parent
-        } else {
-            Journal::new()
-        }
+    pub fn revert_page(&mut self) {
+        self.journal = self.journal.revert_page(self.journal.page)
+    }
+
+    pub fn revert_all(&mut self) {
+        self.journal = Journal::new()
     }
 
     pub fn set_code(&mut self, address: H160, code: Vec<u8>) {

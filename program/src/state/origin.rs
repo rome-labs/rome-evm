@@ -1,7 +1,7 @@
 use {
     crate::{
         accounts::{AccountState, Data},
-        context::account_lock::AccountLock,
+        context::AccountLock,
         error::{Result, RomeProgramError::*},
         info::Info,
         state::{base::Base, State},
@@ -10,7 +10,7 @@ use {
     evm::{H160, H256, U256},
     solana_program::{
         clock::Slot, instruction::Instruction, log::sol_log_data, program::{
-            invoke_signed_unchecked, invoke,
+            invoke_signed, invoke,
         },
         pubkey::Pubkey, sysvar::recent_blockhashes,
     },
@@ -96,7 +96,7 @@ pub trait Origin {
     }
     fn base(&self) -> &Base;
     fn account(&self, key: &Pubkey) -> Result<Account>;
-    fn invoke_signed(&self, ix: &Instruction, seed: Seed) -> Result<()>;
+    fn invoke_signed(&self, ix: &Instruction, seed: &Seed, refund_to_signer: bool) -> Result<()>;
     fn signer(&self) -> Pubkey;
 }
 
@@ -221,8 +221,8 @@ impl Origin for State<'_> {
         Ok(acc)
     }
 
-    fn invoke_signed(&self, ix: &Instruction, seed: Seed) -> Result<()> {
-        let f = |key: Pubkey| {
+    fn invoke_signed(&self, ix: &Instruction, seed: &Seed, refund_to_signer: bool) -> Result<()> {
+        let f_info = |key: Pubkey| {
             self
                 .all()
                 .get(&key)
@@ -236,16 +236,36 @@ impl Origin for State<'_> {
         infos = ix
             .accounts
             .iter()
-            .map(|a| f(a.pubkey))
+            .map(|a| f_info(a.pubkey))
             .collect::<Result<Vec<_>>>()?;
 
-        infos.push(f(ix.program_id)?);
+        infos.push(f_info(ix.program_id)?);
 
-        if seed.items.is_empty() {
-            invoke(ix, infos.as_slice())?;
+        let f_invoke = || -> Result<()> {
+            if seed.items.is_empty() {
+                invoke(ix, infos.as_slice())?;
+            } else {
+                invoke_signed(ix, infos.as_slice(), &[seed.cast().as_slice()])?;
+            }
+            Ok(())
+        };
+
+        if refund_to_signer {
+            let init = self.signer.lamports();
+
+            f_invoke()?;
+
+            let actual = self.signer.lamports();
+            if init > actual {
+                self.add_fee(init - actual)?;
+            } else if actual > init {
+                self.add_refund(actual - init)?;
+            }
         } else {
-            invoke_signed_unchecked(ix, infos.as_slice(), &[seed.cast().as_slice()])?;
+            f_invoke()?
         }
+
+        self.syscall.inc();
 
         Ok(())
     }

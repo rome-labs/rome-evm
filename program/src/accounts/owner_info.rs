@@ -12,9 +12,9 @@ use {
 #[derive(Clone, Default, Debug)]
 #[repr(C, packed)]
 pub struct OwnerInfo {
-    pub key: Pubkey,
+    pub _key: Pubkey,
     pub chain: u64,
-    pub mint_address: Option<H160>,
+    pub _mint_address: Option<H160>,
     pub slot: u64,
 }
 
@@ -26,22 +26,6 @@ impl OwnerInfo {
         assert!(owner.is_empty());
 
         Ok(())
-    }
-
-    pub fn get_mut<'a>(
-        info: &'a AccountInfo,
-        key: &Pubkey,
-        chain: u64,
-    ) -> Result<Option<RefMut<'a, Self>>> {
-        let reg = OwnerInfo::from_account_mut(info)?;
-
-        for (ix, owner) in reg.iter().enumerate() {
-            if owner.key == *key && owner.chain == chain {
-                let owner_ref = RefMut::map(reg, |a| &mut a[ix]);
-                return Ok(Some(owner_ref));
-            }
-        }
-        Ok(None)
     }
 
     pub fn is_owned(info: &AccountInfo, chain: u64) -> Result<bool> {

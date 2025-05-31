@@ -35,8 +35,8 @@ pub enum RomeProgramError {
     #[error("The AccountInfo has an invalid owner: {0}")]
     InvalidOwner(Pubkey),
 
-    #[error("The AccountInfo is non-writeable where a writeable key was expected: {0}")]
-    NonWriteableAccount(Pubkey),
+    #[error("The AccountInfo is non-writable where a writable key was expected: {0}")]
+    NonWritableAccount(Pubkey),
 
     #[error("An IO error was captured, wrap it up and forward it along {0}")]
     IoError(std::io::Error),
@@ -50,11 +50,11 @@ pub enum RomeProgramError {
     #[error("Custom error: {0}")]
     Custom(String),
 
-    #[error("User does not have sufficient funds: {0} {0}")]
+    #[error("User does not have sufficient funds (Wei): {0} {0}")]
     InsufficientFunds(H160, U256),
 
-    #[error("Payer does not have sufficient SOL: {0}")]
-    InsufficientSOLs(Pubkey),
+    #[error("Payer does not have sufficient lamports: {0} {1}")]
+    InsufficientLamports(Pubkey, u64),
 
     #[error("RLP Decored error: {0}")]
     RlpDecoderError(#[from] DecoderError),
@@ -174,6 +174,24 @@ pub enum RomeProgramError {
 
     #[error("Inconsistent account list")]
     InconsistentAccountList,
+
+    #[error("Inconsistency between the rpl type and the rome-evm instruction type")]
+    IncorrectRlpType,
+
+    #[error("Incorrect deposit instruction parameters")]
+    InvalidDepositInstruction,
+
+    #[error("deposit/withdraw transaction value should be multiple of 10^9")]
+    TxValueNotMultipleOf10_9,
+
+    #[error("transaction value exceeds the u64 format")]
+    TxValueExceedsU64,
+
+    #[error("insufficient gas: {0} {1}")]
+    InsufficientGas(U256, U256),
+
+    #[error("Gas_price is less than the minimum value 10^9")]
+    InvalidGasPrice,
 }
 
 impl From<ProgramError> for RomeProgramError {

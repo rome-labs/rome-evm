@@ -35,7 +35,7 @@ impl AccountType {
     }
 
     pub fn check_owner(info: &AccountInfo, program_id: &Pubkey) -> Result<()> {
-        // TODO
+        // TODO introduce the type for any rome-evm accounts
         if info.owner != program_id || info.data_len() == 0 {
             return Err(InvalidOwner(*info.key));
         }
@@ -49,6 +49,14 @@ impl AccountType {
             Ok(())
         } else {
             Err(InvalidAccountType(*info.key))
+        }
+    }
+
+    pub fn is_paid(&self) -> bool {
+        match self {
+            AccountType::New => unreachable!(),
+            AccountType::Balance | AccountType::Storage | AccountType::RoLock => true,
+            _ => false
         }
     }
 }

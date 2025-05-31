@@ -1,11 +1,11 @@
 use {
     crate::{
-        context::ContextAtomic,
-        error::Result,
+        context::ContextAt,
+        error::{Result, RomeProgramError::*},
         split_fee, split_hash, split_u64,
         state::State,
-        vm::{vm_atomic::MachineAtomic, Execute, Vm},
-        Holder,
+        vm::{vm_atomic::MachineAt, Execute, VmAt},
+        Holder, origin::Origin, TxHolder, SIG_VERIFY_COST, Data,
     },
     evm::{H160, H256},
     solana_program::{account_info::AccountInfo, msg, pubkey::Pubkey},
@@ -21,6 +21,15 @@ pub fn args(data: &[u8]) -> Result<(u64, H256, u64, Option<H160>)> {
     Ok((holder, hash, chain, fee_addr))
 }
 
+pub fn transmit_fee (info: &AccountInfo) -> Result<u64> {
+    let iter_cnt = TxHolder::from_account(info)?.iter_cnt as u64;
+    SIG_VERIFY_COST.checked_mul(iter_cnt).ok_or(CalculationOverflow)
+}
+pub fn add_transmit_fee<T: Origin>(state: &T, info: &AccountInfo) -> Result<()> {
+    let lamports = transmit_fee(info)?;
+    state.base().add_fee(lamports)
+}
+
 pub fn do_tx_holder<'a>(
     program_id: &'a Pubkey,
     accounts: &'a [AccountInfo<'a>],
@@ -32,9 +41,12 @@ pub fn do_tx_holder<'a>(
     let state = State::new(program_id, accounts, chain)?;
 
     let info = state.info_tx_holder(holder, false)?;
+    add_transmit_fee(&state, info)?;
+    
     let rlp = Holder::rlp(info, hash, chain)?;
-    let context = ContextAtomic::new(&state, &rlp, fee_addr);
 
-    let mut vm = Vm::new_atomic(&state, &context)?;
-    vm.consume(MachineAtomic::Lock)
+    let context = ContextAt::new(&state);
+    let mut vm = VmAt::new(&state, &rlp, fee_addr, &context)?;
+
+    vm.consume(MachineAt::Lock)
 }

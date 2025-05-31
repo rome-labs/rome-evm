@@ -1,11 +1,11 @@
 use {
     crate::{
-        context::ContextAtomic,
+        context::ContextAt,
         error::Result,
         split_fee,
         state::State,
         tx::tx::Tx,
-        vm::{vm_atomic::MachineAtomic, Execute, Vm},
+        vm::{vm_atomic::MachineAt, Execute, VmAt},
     },
     solana_program::{account_info::AccountInfo, msg, pubkey::Pubkey},
 };
@@ -20,7 +20,8 @@ pub fn do_tx<'a>(
     let (fee_addr, rlp) = split_fee(data)?;
     let chain = Tx::chain_id_from_rlp(rlp)?;
     let state = State::new(program_id, accounts, chain)?;
-    let context = ContextAtomic::new(&state, rlp, fee_addr);
-    let mut vm = Vm::new_atomic(&state, &context)?;
-    vm.consume(MachineAtomic::Lock)
+    let context = ContextAt::new(&state);
+    let mut vm = VmAt::new(&state, rlp, fee_addr, &context)?;
+
+    vm.consume(MachineAt::Lock)
 }

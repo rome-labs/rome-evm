@@ -37,6 +37,8 @@ pub struct Base<'a> {
     dealloc_payed: RefCell<usize>,
     pub pda: Pda<'a>,
     pub syscall: Rc<Syscall>,
+    pub lamports_fee: RefCell<u64>,
+    pub lamports_refund: RefCell<u64>,
 }
 
 impl<'a> Base<'a> {
@@ -52,6 +54,8 @@ impl<'a> Base<'a> {
             dealloc_payed: RefCell::new(0),
             pda: Pda::new(program_id, chain, Rc::clone(&syscall)),
             syscall,
+            lamports_fee: RefCell::new(0),
+            lamports_refund: RefCell::new(0),
         }
     }
     pub fn alloc_limit(&self) -> usize {
@@ -79,6 +83,29 @@ impl<'a> Base<'a> {
         *self.dealloc_payed.borrow_mut() = 0;
         self.syscall.reset();
         self.pda.reset();
+        *self.lamports_fee.borrow_mut() = 0;
+        *self.lamports_refund.borrow_mut() = 0;
+    }
+
+    pub fn get_fees(&self) -> (u64, u64) {
+        (*self.lamports_fee.borrow(), *self.lamports_refund.borrow())
+    }
+
+    pub fn add_fee(&self, lamports: u64) -> Result<()> {
+        let mut val = self.lamports_fee.borrow_mut();
+        *val = val.checked_add(lamports).ok_or(CalculationOverflow)?;
+        Ok(())
+    }
+
+    pub fn add_refund(&self, lamports: u64) -> Result<()> {
+        let mut val = self.lamports_fee.borrow_mut();
+        *val = val.checked_add(lamports).ok_or(CalculationOverflow)?;
+        Ok(())
+    }
+    
+    pub fn reset_fees(&self) {
+        *self.lamports_fee.borrow_mut() = 0;
+        *self.lamports_refund.borrow_mut() = 0;
     }
 }
 

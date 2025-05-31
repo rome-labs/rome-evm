@@ -1,3 +1,4 @@
+use std::cmp::Ordering::{Greater, Less};
 use {
     super::fake,
     crate::stubs::Stubs,
@@ -6,12 +7,12 @@ use {
         error::{Result, RomeProgramError::*},
         state::{base::Base, pda::Pda},
         AccountType::{self, *},
-        Data, OwnerInfo, H160, U256, state::aux::Account,
+        Data, OwnerInfo, H160, U256, state::aux::Account, origin::Origin, pda::Seed,
     },
     solana_client::rpc_client::RpcClient,
     solana_program::{
         account_info::IntoAccountInfo, msg, pubkey::Pubkey, rent::Rent, system_program,
-        sysvar::Sysvar, program_stubs::set_syscall_stubs,
+        sysvar::Sysvar, program_stubs::set_syscall_stubs, system_instruction,
     },
     std::{cell::RefCell, collections::BTreeMap, ops::Deref, sync::Arc},
 };
@@ -84,7 +85,7 @@ impl<'a> State<'a> {
                     owner: Pubkey::default(),
                     executable: false,
                     rent_epoch: 0,
-                    writeable: true,
+                    writable: true,
                 };
                 state.insert((fake::ID, acc), None);
                 state.set_signer(&fake::ID);
@@ -123,6 +124,7 @@ impl<'a> State<'a> {
         let (key, _) = self.pda.owner_info_key();
         self.info_pda(&key, OwnerInfo, None, or_create)
     }
+    // TODO: the missing account must be included in the transaction accounts
     pub fn info_pda(
         &self,
         key: &Pubkey,
@@ -131,6 +133,26 @@ impl<'a> State<'a> {
         or_create: bool,
     ) -> Result<Bind> {
         if let Some(mut bind) = self.load(key, addr, or_create)? {
+            // TODO: associated_spl_token::create_associated_token_account accepts the account owned by EVM.
+            // It's state is not required, only pubkey is used. This approach is incorrect.
+            // External programs should not accept EVM accounts. It is related to the implementation of
+            // emulation of the external programs.
+            // It is necessary to replace aspl_token instruction by  system_program::create_account
+            // and spl_token::InitializeAccount3 and remove this workaround:
+            if bind.1.lamports == 0
+                && system_program::check_id(&bind.1.owner)
+                && bind.1.data.is_empty()
+                && bind.1.writable == false {
+
+                if or_create {
+                    self.create_pda(&typ, *key, addr)?;
+                    return self.info_pda(key, typ, addr, or_create);
+                } else {
+                    return Err(PdaAccountNotFound(*key, typ))
+                }
+            }
+
+            self.update_writable(&bind.0, or_create);
             let info = bind.into_account_info();
             AccountType::is_ok(&info, typ, self.program_id)?;
             Ok(bind)
@@ -144,10 +166,10 @@ impl<'a> State<'a> {
     pub fn info_external(
         &self,
         key: &Pubkey,
-        writeable: bool,
+        writable: bool,
     ) -> Result<Bind> {
-
-        if let Some(bind) = self.load(key, None, writeable)? {
+        if let Some(bind) = self.load(key, None, writable)? {
+            self.update_writable(&bind.0, writable);
             Ok(bind)
         } else {
             let new = Account {
@@ -156,13 +178,39 @@ impl<'a> State<'a> {
                 owner: system_program::ID,
                 executable: false,
                 rent_epoch: 0,
-                writeable,
+                writable,
             };
 
             let bind = (*key, new);
             self.insert(bind, None);
-            self.info_external(key, writeable)
+            self.info_external(key, writable)
         }
+    }
+    pub fn info_sol_wallet(&self, or_create: bool) -> Result<Bind> {
+        let (key, _) = self.pda.sol_wallet();
+        let bind = self.info_external(&key, true)?;
+
+        if bind.1.lamports == 0 {
+            if !or_create {
+                return Err(AccountNotFound(key))
+            }
+            assert_eq!(bind.1.data.len(), 0);
+            assert!(bind.1.writable);
+            assert_eq!(bind.1.owner, system_program::ID);
+
+            let rent = Rent::get()?.minimum_balance(0);
+            let ix = &system_instruction::create_account(
+                &self.signer(),
+                &key,
+                rent,
+                0,
+                &system_program::ID,
+            );
+
+            self.invoke_signed(&ix, &Seed::default(), false)?;
+        }
+
+        Ok(bind)
     }
 
     pub fn info_program(
@@ -198,11 +246,10 @@ impl<'a> State<'a> {
         &self,
         key: &Pubkey,
         address: Option<H160>,
-        writeable: bool
+        writable: bool
     ) -> Result<Option<Bind>> {
 
-        if let Some(item) = self.accounts.borrow_mut().get_mut(key) {
-            item.account.writeable |= writeable;
+        if let Some(item) = self.accounts.borrow().get(key) {
             let bind = (*key, item.account.clone());
             return Ok(Some(bind))
         }
@@ -223,24 +270,29 @@ impl<'a> State<'a> {
                             owner: sdk.owner,
                             executable: sdk.executable,
                             rent_epoch: sdk.rent_epoch,
-                            writeable,
+                            writable,
                         }
                     };
                     let bind = (*key, acc);
                     self.insert(bind, address);
-                    self.load(key, address, writeable)
+                    self.load(key, address, writable)
             })
    }
     pub fn update(&self, bind: Bind) {
         let mut accounts = self.accounts.borrow_mut();
         let item = accounts.get_mut(&bind.0).unwrap();
         item.account = bind.1;
-        item.account.writeable = true;
+        item.account.writable = true;
     }
     pub fn set_signer(&self, key: &Pubkey) {
         let mut accounts = self.accounts.borrow_mut();
         let item = accounts.get_mut(key).unwrap();
         item.signer = true;
+    }
+    pub fn update_writable(&self, key: &Pubkey, writeable: bool) {
+        let mut accounts = self.accounts.borrow_mut();
+        let item = accounts.get_mut(key).unwrap();
+        item.account.writable |= writeable;
     }
     pub fn insert(&self, bind: Bind, address: Option<H160>) {
         let item = Item {
@@ -249,58 +301,80 @@ impl<'a> State<'a> {
             address,
         };
         let mut accounts = self.accounts.borrow_mut();
-        assert!(accounts.insert(bind.0, item).is_none());
-    }
 
-    pub fn count_space(
-        &self,
-        old: usize,
-        new: usize,
-        typ: &AccountType,
-        key: &Pubkey,
-    ) -> Result<()> {
-        let f = |len: usize, func: &dyn Fn(&Base<'a>, usize) -> Result<()>| -> Result<()> {
-            match typ {
-                New => Err(Custom(format!("resizing of uninitialized account {}", key))),
-                // TODO: remove RoLock from alloc_state
-                Balance | Storage | AccountType::RoLock => func(&self.base, len),
-                _ => Ok(()),
-            }
-        };
-
-        if old < new {
-            let diff = new.saturating_sub(old);
-            self.inc_alloc(diff)?;
-            f(diff, &Base::inc_alloc_payed)
-        } else {
-            let diff = old.saturating_sub(new);
-            self.inc_dealloc(diff)?;
-            f(diff, &Base::inc_dealloc_payed)
+        if let Some (item) = accounts.insert(bind.0, item) {
+            assert_eq!(item.account.lamports, 0);
+            assert!(item.account.data.is_empty());
+            assert_eq!(item.account.owner, system_program::ID);
+            assert_eq!(item.account.writable, false);
         }
     }
-    pub fn realloc(&self, bind: &mut Bind, len: usize) -> Result<()> {
+
+    pub fn set_addr(&self, key: &Pubkey, address: Option<H160>) {
+        if let Some(address) = address {
+            let mut accounts = self.accounts.borrow_mut();
+            let item = accounts.get_mut(key).unwrap();
+            item.address = Some(address)
+        }
+    }
+
+    pub fn inc_space_counter(&self, alloc: usize, dealloc: usize, refund_to_signer: bool) -> Result<()> {
+        Base::inc_alloc(&self.base, alloc)?;
+        Base::inc_dealloc(&self.base, dealloc)?;
+
+        if refund_to_signer {
+            Base::inc_alloc_payed(&self.base, alloc)?;
+            Base::inc_dealloc_payed(&self.base, dealloc)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn realloc(&self, key: &Pubkey, len: usize) -> Result<()> {
+        let mut bind = self.info_sys(key)?;
+
         assert!(!bind.1.data.is_empty());
         assert_eq!(&bind.1.owner, self.program_id);
 
-        let typ = {
+        let alloc = len.saturating_sub(bind.1.data.len());
+        let dealloc = bind.1.data.len().saturating_sub(len);
+
+        let refund_to_signer = {
             let info = bind.into_account_info();
             let typ = AccountType::from_account(&info)?;
-            typ.clone()
+            typ.is_paid()
         };
-        self.count_space(bind.1.data.len(), len, &typ, &bind.0)?;
+        self.inc_space_counter(alloc, dealloc, refund_to_signer)?;
 
-        let acc = &mut bind.1;
-        acc.data.resize(len, 0);
-        msg!("resized len: {}", acc.data.len());
+        bind.1.data.resize(len, 0);
+        msg!("resized len: {}", bind.1.data.len());
 
-        let rent = Rent::get()?.minimum_balance(acc.data.len());
+        let lamports = bind.1.lamports;
+        let rent = Rent::get()?.minimum_balance(bind.1.data.len());
 
-        if rent > acc.lamports {
-            self.syscall.inc(); // transfer
+        match rent.cmp(&lamports) {
+            Greater => {
+                self.update(bind);
+                let ix = system_instruction::transfer(&self.signer(), key, rent - lamports);
+                self.invoke_signed(&ix, &Seed::default(), refund_to_signer)?;
+            }
+            Less => {
+                let refund = lamports - rent;
+
+                bind.1.lamports -= refund;
+                self.update(bind);
+
+                let mut signer_bind = self.info_sys(&self.signer())?;
+                signer_bind.1.lamports += refund;
+                self.update(signer_bind);
+
+                if refund_to_signer {
+                    self.add_refund(refund)?;
+                }
+            }
+            _ => {}
         }
 
-        let _sys_acc = self.info_sys(&system_program::ID)?;
-        acc.lamports = rent;
 
         Ok(())
     }
@@ -311,28 +385,24 @@ impl<'a> State<'a> {
     }
     pub fn create_pda(&self, typ: &AccountType, key: Pubkey, addr: Option<H160>) -> Result<()> {
         let len = State::pda_size(typ);
-        let epoch = self.client.get_epoch_info()?;
-
         let rent = Rent::get()?.minimum_balance(len);
-        let _sys_acc = self.info_sys(&system_program::ID)?;
 
-        let pda = Account {
-            lamports: rent,
-            data: vec![0; len],
-            owner: *self.program_id,
-            executable: false,
-            rent_epoch: epoch.epoch,
-            writeable: true,
-        };
-        self.syscall.inc();
+        let ix = system_instruction::create_account(
+            &self.signer(),
+            &key,
+            rent,
+            len as u64,
+            self.program_id,
+        );
 
-        let mut bind = (key, pda);
-        {
-            let info = bind.into_account_info();
-            Pda::init(&info, typ)?;
-        }
-        self.count_space(0, len, typ, &bind.0)?;
-        self.insert(bind, addr);
+        self.invoke_signed(&ix, &Seed::default(), typ.is_paid())?;
+
+        self.set_addr(&key, addr);
+
+        let mut accs = self.accounts.borrow_mut();
+        let item = accs.get_mut(&key).unwrap();
+        let info = (&key, &mut item.account).into_account_info();
+        Pda::init(&info, typ)?;
 
         Ok(())
     }

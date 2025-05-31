@@ -1,11 +1,11 @@
 use {
     super::Emulation,
-    crate::{state::State, ContextAtomic},
+    crate::{state::State, ContextAt},
     rome_evm::{
         api::split_fee,
         error::Result,
         tx::tx::Tx,
-        vm::{self, vm_atomic::MachineAtomic, Execute},
+        vm::{vm_atomic::{VmAt, MachineAt}, Execute},
         H160,
     },
     solana_client::rpc_client::RpcClient,
@@ -27,15 +27,16 @@ pub fn do_tx<'a>(
 }
 
 pub fn atomic_transaction(state: State, rlp: &[u8], fee_addr: Option<H160>) -> Result<Emulation> {
-    let context = ContextAtomic::new(&state, rlp, fee_addr);
-    let mut vm = vm::Vm::new_atomic(&state, &context)?;
-    vm.consume(MachineAtomic::Lock)?;
+    let context = ContextAt::new(&state);
+    let mut vm = VmAt::new(&state, rlp, fee_addr, &context)?;
+    vm.consume(MachineAt::Lock)?;
 
+    let (fee, refund) = state.get_fees();
     let report = Emulation::with_vm(
         &state,
-        vm.exit_reason,
-        vm.return_value,
-        vm.steps_executed,
+        vm.vm.exit_reason,
+        vm.vm.return_value,
+        vm.vm.steps_executed,
         1,
         state.alloc(),
         state.dealloc(),
@@ -43,6 +44,10 @@ pub fn atomic_transaction(state: State, rlp: &[u8], fee_addr: Option<H160>) -> R
         state.dealloc_payed(),
         vec![],
         state.syscall.count(),
+        fee,
+        refund,
+        false,
+        None,
     );
 
     report

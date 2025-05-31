@@ -3,6 +3,7 @@ mod eip2930;
 pub mod legacy;
 #[allow(clippy::module_inception)]
 pub mod tx;
+pub mod deposit;
 
 use {
     crate::error::{Result, RomeProgramError::*},
@@ -26,6 +27,7 @@ pub trait Base {
     fn set_from(&mut self, from: H160);
     #[cfg(test)]
     fn access_list(&self) -> Option<&eip2930::AccessList>;
+    fn mint(&self) -> U256;
 }
 
 fn fix(view: &Rlp, index: usize) -> std::result::Result<U256, DecoderError> {

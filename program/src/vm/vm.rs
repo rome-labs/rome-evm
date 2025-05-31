@@ -1,8 +1,10 @@
 use {
     super::Snapshot,
     crate::{
-        config::{EXIT_REASON, GAS_RECIPIENT, GAS_VALUE, REVERT_ERROR, REVERT_PANIC},
-        context::{account_lock::AccountLock, Context},
+        config::{
+            EXIT_REASON, GAS_RECIPIENT, GAS_VALUE, REVERT_ERROR, REVERT_PANIC, RSOL_DECIMALS,
+            GAS_PRICE,
+        },
         error::{Result, RomeProgramError::*},
         origin::Origin,
         state::{
@@ -12,22 +14,38 @@ use {
         tx::tx::Tx,
         vm::Reason,
     },
-    evm::{Capture, ExitFatal, ExitReason, Handler, Resolve, H160, U256},
+    evm::{Capture, ExitReason, Handler, Resolve, H160, U256},
     solana_program::{log::sol_log_data, msg},
     std::mem::size_of,
 };
 
-pub struct Vm<'a, T: Origin + Allocate, M, L: AccountLock + Context> {
+pub enum Trap {
+    Call(CallInterrupt),
+    Create(CreateInterrupt),
+    ExitFromSnapshot(ExitReason),
+    ExitNoShapshot(Vec<u8>, ExitReason),
+}
+
+pub struct Vm<'a, T: Origin + Allocate> {
     pub snapshot: Option<Box<Snapshot>>,
     pub handler: JournaledState<'a, T>,
-    pub state_machine: Option<M>,
     pub return_value: Option<Vec<u8>>,
     pub exit_reason: Option<ExitReason>,
-    pub context: &'a L,
     pub steps_executed: u64,
 }
 
-impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M, L> {
+impl<'a, T: Origin + Allocate> Vm<'a, T> {
+    pub fn new(state: &'a T) -> Result<Self> {
+        let vm = Self {
+            snapshot: None,
+            handler: JournaledState::new(state)?,
+            return_value: None,
+            exit_reason: None,
+            steps_executed: 0,
+        };
+
+        Ok(vm)
+    }
     pub fn is_mut(&self) -> bool {
         if let Some(snapshot) = self.snapshot.as_ref() {
             return snapshot.is_mut();
@@ -36,7 +54,7 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         true
     }
 
-    pub fn call_from_tx(&self, tx: &mut Tx) -> Result<CallInterrupt> {
+    pub fn call_from_tx(&mut self, tx: &mut Tx) -> Capture<(ExitReason, Vec<u8>), CallInterrupt> {
         let to = tx.to().unwrap();
         let context = evm::Context {
             address: to,
@@ -54,43 +72,14 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
             None
         };
 
-        Ok(CallInterrupt {
-            code_address: to,
-            transfer,
-            input: tx.data().unwrap(),
-            is_static: false,
-            context,
-        })
+        let input = tx.data().unwrap();
+
+        self
+            .handler
+            .call(to, transfer, input, None, false, context)
     }
 
-    pub fn create_from_tx(&self, tx: &mut Tx) -> Result<CreateInterrupt> {
-        let address_scheme = evm::CreateScheme::Legacy { caller: tx.from() };
-        let to = self.handler.build_address(address_scheme)?;
-        let context = evm::Context {
-            address: to,
-            caller: tx.from(),
-            apparent_value: tx.value(),
-        };
-
-        let transfer = if !tx.value().is_zero() {
-            Some(evm::Transfer {
-                source: tx.from(),
-                target: to,
-                value: tx.value(),
-            })
-        } else {
-            None
-        };
-
-        Ok(CreateInterrupt {
-            context,
-            address: to,
-            transfer,
-            init_code: tx.data().unwrap(),
-        })
-    }
-
-    pub fn call_snapshot(&mut self, call: CallInterrupt) -> Result<Box<Snapshot>> {
+    pub fn push_call_snapshot(&mut self, call: CallInterrupt) {
         msg!(
             "Call: from {}, to {}",
             &hex::encode(call.context.caller),
@@ -101,9 +90,14 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         let runtime = evm::Runtime::new(code, valids, call.input, call.context);
 
         self.handler.new_page();
+
+        if self.snapshot.is_none() {
+            let from = self.handler.origin.unwrap();
+            self.handler.journal.get_mut(&from).push(Diff::NonceChange);
+        }
+
         if let Some(transfer) = call.transfer {
-            self.handler
-                .transfer(&transfer.source, &transfer.target, &transfer.value)?;
+            self.handler.transfer(&transfer.source, &transfer.target, &transfer.value);
         }
         let snapshot = Snapshot {
             evm: runtime,
@@ -112,10 +106,10 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
             parent: None,
         };
 
-        Ok(Box::new(snapshot))
+        self.push_snapshot(snapshot);
     }
 
-    pub fn create_snapshot(&mut self, create: CreateInterrupt) -> Result<Box<Snapshot>> {
+    pub fn push_create_snapshot(&mut self, create: CreateInterrupt) {
         msg!(
             "Create: from {}, contract {}",
             &hex::encode(create.context.caller),
@@ -123,15 +117,17 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         );
         let valids = evm::Valids::compute(&create.init_code);
         let to = create.address;
+        let caller = create.context.caller;
         let runtime = evm::Runtime::new(create.init_code, valids, vec![], create.context);
 
         self.handler.new_page();
+        self.handler.journal.get_mut(&caller).push(Diff::NonceChange);
+
         if evm::CONFIG.create_increase_nonce {
             self.handler.journal.get_mut(&to).push(Diff::NonceChange);
         }
         if let Some(transfer) = create.transfer {
-            self.handler
-                .transfer(&transfer.source, &transfer.target, &transfer.value)?;
+            self.handler.transfer(&transfer.source, &transfer.target, &transfer.value);
         }
         let snapshot = Snapshot {
             evm: runtime,
@@ -140,41 +136,88 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
             parent: None,
         };
 
-        Ok(Box::new(snapshot))
+        self.push_snapshot(snapshot);
     }
 
-    pub fn snapshot_from_tx(&mut self) -> Result<Box<Snapshot>> {
-        let mut tx = self.context.tx()?;
+    pub fn push_snapshot(&mut self, mut new: Snapshot) {
+        self.handler.mutable = new.mutable;
+        new.parent = self.snapshot.take();
+        self.snapshot = Some(Box::new(new));
+        // TODO: remove "mutable" and "from" fields from JournaledState,
+        // TODO: implement Handler trait for the struct:
+        // struct {
+        //    handler: JournaledState,
+        //    snapshot: Snanpshot,
+        // }
+    }
+
+    pub fn pop_snapshot(&mut self) -> Option<Box<Snapshot>> {
+        if let Some(mut snapshot) = self.snapshot.take() {
+            self.snapshot = snapshot.parent.take();
+            self.handler.mutable = self.is_mut();
+
+            return Some(snapshot);
+        }
+
+        None
+    }
+
+    pub fn verify_gas_price(&self) -> Result<()> {
+        if self.handler.gas_recipient.is_some() {
+            if self.handler.gas_price.unwrap() < U256::exp10(RSOL_DECIMALS - 9) {
+                return Err(InvalidGasPrice)
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn init(
+        &mut self,
+        tx: &mut Tx,
+        check_nonce: bool,
+        fee_recipient: Option<H160>
+    ) -> Result<Option<(Vec<u8>, ExitReason)>> {
+
         let from = tx.from();
         msg!("from {}", &hex::encode(from));
 
         // TODO add test to eliminate the possibility of repeated transaction execution
-        if self.context.check_nonce() {
+        if check_nonce {
             let nonce = self.handler.nonce(from);
             if nonce != tx.nonce().into() {
                 return Err(InvalidTxNonce(from, tx.nonce(), nonce.as_u64()));
             }
         }
-
-        let snapshot = if tx.to().is_some() {
-            let call = self.call_from_tx(&mut tx)?;
-            self.call_snapshot(call)?
-        } else {
-            let create = self.create_from_tx(&mut tx)?;
-            self.create_snapshot(create)?
-        };
-
-        //todo: remove it for the eth_call
-        self.handler
-            .journal
-            .get_mut(&tx.from())
-            .push(Diff::NonceChange); // manual increment caller.nonce
-        self.handler.origin = Some(tx.from());
+        self.handler.origin = Some(from);
         self.handler.gas_limit = Some(tx.gas_limit());
         self.handler.gas_price = Some(tx.gas_price());
-        self.handler.gas_recipient = self.context.fee_recipient();
+        self.handler.gas_recipient = fee_recipient;
+        self.verify_gas_price()?;
 
-        Ok(snapshot)
+        let trap = if tx.to().is_some() {
+            match self.call_from_tx(tx) {
+                Capture::Trap(call) => Trap::Call(call),
+                Capture::Exit((reason, value)) => Trap::ExitNoShapshot(value, reason)
+            }
+        } else {
+            let capture = self
+                .handler
+                .create(
+                    tx.from(),
+                    evm::CreateScheme::Legacy { caller: tx.from() },
+                    tx.value(),
+                    tx.data().unwrap(),
+                    None,
+                );
+
+            match capture {
+                Capture::Trap(create) => Trap::Create(create),
+                Capture::Exit((reason, _, value)) => Trap::ExitNoShapshot(value, reason)
+            }
+        };
+
+        Ok(self.trap(trap))
     }
 
     pub fn commit_exit(
@@ -182,10 +225,6 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         snapshot: Box<Snapshot>,
         reason: ExitReason,
     ) -> Option<(Vec<u8>, ExitReason)> {
-        if !reason.is_succeed() {
-            self.handler.revert_diff();
-        }
-
         match snapshot.reason {
             Reason::Call => self.commit_exit_call(snapshot, reason),
             Reason::Create(address) => self.commit_exit_create(snapshot, reason, address),
@@ -197,21 +236,25 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         snapshot: Box<Snapshot>,
         reason: ExitReason,
     ) -> Option<(Vec<u8>, ExitReason)> {
-        // TODO: check return_value in case of revert
         let return_value = snapshot.evm.machine().return_value();
 
-        if let Some(snapshot) = self.snapshot.as_mut() {
-            match evm::save_return_value::<JournaledState<'a, T>>(
-                &mut snapshot.evm,
-                reason,
-                return_value,
-            ) {
-                evm::Control::Continue => None,
-                evm::Control::Exit(reason) => Some((vec![], reason)),
-                _ => unreachable!(),
-            }
-        } else {
-            Some((return_value, reason))
+        if self.snapshot.is_none() {
+            return Some((return_value, reason))
+        }
+
+        let latest = self.snapshot.as_mut().unwrap();
+
+        match evm::save_return_value::<JournaledState<'a, T>>(
+            &mut latest.evm,
+            reason,
+            return_value,
+        ) {
+            evm::Control::Continue => None,
+            evm::Control::Exit(reason) => {
+                assert!(reason.is_fatal());
+                Some((vec![], reason))
+            },
+            _ => unreachable!(),
         }
     }
     pub fn commit_exit_create(
@@ -222,54 +265,32 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
     ) -> Option<(Vec<u8>, ExitReason)> {
         if reason.is_succeed() {
             let return_value = snapshot.evm.machine().return_value();
-            // TODO: static flag ?
+            assert!(self.handler.mutable);
             self.handler.set_code(address, return_value);
         }
 
-        let snapshot = if let Some(snapshot) = self.snapshot.as_mut() {
-            snapshot
-        } else {
-            let return_value = if let ExitReason::Revert(_) = reason {
-                snapshot.evm.machine().return_value()
+        if self.snapshot.is_none() {
+            return if reason.is_revert() {
+                Some((snapshot.evm.machine().return_value(), reason))
             } else {
-                vec![]
+                Some((vec![], reason))
             };
-            return Some((return_value, reason));
-        };
+        }
+
+        let latest = self.snapshot.as_mut().unwrap();
 
         match evm::save_created_address::<JournaledState<'a, T>>(
-            &mut snapshot.evm,
+            &mut latest.evm,
             reason,
             Some(address),
         ) {
             evm::Control::Continue => None,
-            evm::Control::Exit(reason) => Some((vec![], reason)),
+            evm::Control::Exit(reason) => {
+                assert!(reason.is_fatal());
+                Some((vec![], reason))
+            },
             _ => unreachable!(),
         }
-    }
-
-    pub fn add_snapshot(&mut self, mut new: Box<Snapshot>) {
-        new.parent = self.snapshot.take();
-        self.snapshot = Some(new);
-        // TODO: remove mutable and from fields from JournaledState,
-        // TODO: implement Handler trait for this one:
-        // struct {
-        //    handler: JournaledState,
-        //    snapshot: Snanpshot,
-        // }
-        //
-        self.handler.mutable = self.is_mut();
-    }
-
-    pub fn remove_snapshot(&mut self) -> Option<Box<Snapshot>> {
-        if let Some(mut snapshot) = self.snapshot.take() {
-            self.snapshot = snapshot.parent.take();
-            self.handler.mutable = self.is_mut();
-
-            return Some(snapshot);
-        }
-
-        None
     }
 
     pub fn log_exit_reason(&self) -> Result<()> {
@@ -340,7 +361,7 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
         Ok(())
     }
 
-    fn capture_to_trap(capture: Capture<ExitReason, Resolve<JournaledState<T>>>) -> Option<Trap> {
+    fn to_trap(capture: Capture<ExitReason, Resolve<JournaledState<T>>>) -> Option<Trap> {
         match capture {
             Capture::Trap(trap) => {
                 match trap {
@@ -355,72 +376,91 @@ impl<'a, T: Origin + Allocate, M: 'static, L: AccountLock + Context> Vm<'a, T, M
                 }
             }
             Capture::Exit(ExitReason::StepLimitReached) => None,
-            Capture::Exit(reason) => Some(Trap::Reason(reason)),
+            Capture::Exit(reason) => Some(Trap::ExitFromSnapshot(reason)),
         }
     }
 
-    pub fn execute(&mut self, steps: u64) -> Result<Option<(Vec<u8>, ExitReason)>> {
-        let trap = if let Some(snapshot) = self.snapshot.as_mut() {
-            let (steps, capture) = snapshot.evm.run(steps, &mut self.handler);
-            self.steps_executed += steps;
-            if let Some(trap) = Self::capture_to_trap(capture) {
-                trap
-            } else {
-                return Ok(None);
-            }
-        } else {
-            return Ok(Some((vec![], ExitReason::Fatal(ExitFatal::NotSupported))));
-        };
-
+    pub fn trap(&mut self, trap: Trap) -> Option<(Vec<u8>, ExitReason)> {
         match trap {
             Trap::Call(call) => {
-                let snapshot = self.call_snapshot(call)?;
-                self.add_snapshot(snapshot);
-                Ok(None)
+                self.push_call_snapshot(call);
+                None
             }
             Trap::Create(create) => {
-                let snapshot = self.create_snapshot(create)?;
-                self.add_snapshot(snapshot);
-                Ok(None)
+                self.push_create_snapshot(create);
+                None
             }
-            Trap::Reason(reason) => {
-                if let Some(snapshot) = self.remove_snapshot() {
-                    Ok(self.commit_exit(snapshot, reason))
-                } else {
-                    Ok(Some((vec![], ExitReason::Fatal(ExitFatal::NotSupported))))
+            Trap::ExitFromSnapshot(reason) => {
+                let snapshot = self.pop_snapshot().expect("vm fault");
+                let exit = self.commit_exit(snapshot, reason);
+
+                if let Some((_, reason)) = exit.as_ref() {
+                    if !reason.is_succeed() {
+                        self.handler.revert_all();  // fatal error or there is no parent snapshot
+                    }
+                    return exit
                 }
+
+                if !reason.is_succeed() {
+                    self.handler.revert_page()
+                } else {
+                    self.handler.journal.merge_page();
+                }
+
+                exit
+            }
+            Trap::ExitNoShapshot(value, reason) => {
+                if reason.is_succeed() { 
+                    let from = self.handler.origin.unwrap();
+                    self.handler.journal.get_mut(&from).push(Diff::NonceChange);
+                }
+                // no need to revert diff, it was done in handler.call()
+                
+                Some((value, reason))
             }
         }
     }
 
-    pub fn log_gas_transfer(&self) {
-        let mut sum_be = [0_u8; 32];
-        self.handler.gas_limit.unwrap().to_big_endian(&mut sum_be);
+    pub fn execute(&mut self, steps: u64) -> Option<(Vec<u8>, ExitReason)> {
+        let snapshot = self.snapshot.as_mut().expect("vm fault");
+        let (steps, capture) = snapshot.evm.run(steps, &mut self.handler);
+        self.steps_executed += steps;
 
-        sol_log_data(&[GAS_VALUE, &sum_be]);
+        Self::to_trap(capture).and_then(|trap| self.trap(trap))
+    }
+ 
+    pub fn gas_transfer(&mut self, fee:u64, refund: u64) -> Result<()> {
+        let mut buf_limit = [0_u8; 32];
+        let mut buf_price = [0_u8; 32];
+
         if let Some(to) = self.handler.gas_recipient {
+            let gas_limit = self.handler.gas_limit.unwrap();
+            let gas_price = self.handler.gas_price.unwrap();
+
+            let from = self.handler.origin.unwrap();
+            let lamports: U256 = fee.saturating_sub(refund).into();
+
+            if lamports > gas_limit {
+                return Err(InsufficientGas(gas_limit, lamports))
+            }
+
+            let wei = lamports.checked_mul(gas_price).ok_or(CalculationOverflow)?;
+            self.handler.transfer(&from, &to, &wei);
+
+            lamports.to_big_endian(&mut buf_limit);
+            gas_price.to_big_endian(&mut buf_price);
+            
             sol_log_data(&[GAS_RECIPIENT, to.as_bytes()]);
         }
-    }
-
-    pub fn gas_transfer(&mut self) -> Result<()> {
-        let gas_used = self.handler.gas_limit.unwrap();
-
-        if let Some(to) = self.handler.gas_recipient {
-            let gas_price = self.handler.gas_price.unwrap();
-            let from = self.handler.origin.unwrap();
-
-            let tx_price = gas_used.checked_mul(gas_price).ok_or(CalculationOverflow)?;
-
-            self.handler.transfer(&from, &to, &tx_price)?;
-        }
+        
+        sol_log_data(&[GAS_VALUE, &buf_limit]);
+        sol_log_data(&[GAS_PRICE, &buf_price]);
 
         Ok(())
     }
-}
 
-pub enum Trap {
-    Call(CallInterrupt),
-    Create(CreateInterrupt),
-    Reason(ExitReason),
+    pub fn set_exit_reason(&mut self, reason: ExitReason, value: Vec<u8>) {
+        self.exit_reason = Some(reason);
+        self.return_value = Some(value);
+    }
 }

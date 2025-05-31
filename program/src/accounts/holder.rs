@@ -1,11 +1,13 @@
 use {
-    super::{cast_slice, cast_slice_mut, Data, TxHolder},
+    super::{cast_slice, cast_slice_mut, Data, TxHolder, StateHolder, AccountType},
     crate::{
         error::{Result, RomeProgramError::IncorrectChainId},
         tx::tx::Tx,
         H256,
     },
-    solana_program::account_info::AccountInfo,
+    solana_program::{
+        account_info::AccountInfo, keccak
+    },
     std::cell::{Ref, RefMut},
 };
 
@@ -13,10 +15,12 @@ use {
 pub struct Holder {}
 
 impl Holder {
-    pub fn rlp<'a>(info: &'a AccountInfo, hash: H256, chain: u64) -> Result<Ref<'a, [u8]>> {
-        let holder = TxHolder::from_account(info)?;
-        holder.check_hash(info, hash)?;
+    pub fn rlp<'a>(info: &'a AccountInfo, ix_hash: H256, chain: u64) -> Result<Ref<'a, [u8]>> {
         let rlp = Holder::from_account(info)?;
+        let rlp_hash = H256::from(keccak::hash(&rlp).to_bytes());
+
+        TxHolder::check_hash(info, ix_hash, rlp_hash)?;
+
         let rpl_chain_id = Tx::chain_id_from_rlp(&rlp)?;
 
         if rpl_chain_id == chain {
@@ -26,8 +30,7 @@ impl Holder {
         }
     }
 
-    pub fn fill(info: &AccountInfo, hash: H256, from: usize, to: usize, tx: &[u8]) -> Result<()> {
-        TxHolder::from_account_mut(info)?.hash = hash;
+    pub fn fill(info: &AccountInfo, from: usize, to: usize, tx: &[u8]) -> Result<()> {
         let holder = Holder::from_account_mut(info)?;
         let mut location = RefMut::map(holder, |a| &mut a[from..to]);
         location.copy_from_slice(tx);
@@ -50,7 +53,13 @@ impl Data for Holder {
         info.data_len() - Self::offset(info)
     }
     fn offset(info: &AccountInfo) -> usize {
-        // size_of::<TxHolder> == size_of<StateHolder>
-        TxHolder::offset(info) + TxHolder::size(info)
+        let typ = AccountType::from_account(info)
+            .expect("invalid argument Holder::offset");
+
+        match *typ {
+            AccountType::TxHolder => TxHolder::offset(info) + TxHolder::size(info),
+            AccountType::StateHolder => StateHolder::offset(info) + StateHolder::size(info),
+            _ => unreachable!()
+        }
     }
 }

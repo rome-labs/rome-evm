@@ -20,7 +20,7 @@ pub fn confirm_tx_iterative(
     let mut bind = state.info_state_holder(holder, false)?;
     let info = bind.into_account_info();
 
-    if !StateHolder::is_linked(&info, hash, session)? {
+    if !StateHolder::has_session(&info, hash, session)? {
         msg!(
             "Iterative tx is not linked to state holder account: {}",
             info.key

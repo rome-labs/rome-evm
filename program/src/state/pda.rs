@@ -1,8 +1,8 @@
 use {
     crate::{
-        error::Result, state::base::Syscall, upgrade_authority, AccountState, AccountType, Data,
+        error::Result, state::base::Syscall, AccountState, AccountType, Data,
         OwnerInfo, RoLock, StateHolder, Storage, TxHolder, ACCOUNT_SEED, OWNER_INFO, RO_LOCK_SEED,
-        STATE_HOLDER_SEED, STORAGE_LEN, TX_HOLDER_SEED,
+        STATE_HOLDER_SEED, STORAGE_LEN, TX_HOLDER_SEED, CONTRACT_SOL_WALLET,
     },
     borsh::{BorshDeserialize, BorshSerialize},
     evm::{H160, U256},
@@ -56,6 +56,17 @@ impl<'a> Pda<'a> {
             storage: RefCell::new(HashMap::new()),
             ro_lock: RefCell::new(HashMap::new()),
             syscall,
+        }
+    }
+    #[cfg(not(target_os = "solana"))]
+    pub fn new_(program_id: &'a Pubkey, chain: u64) -> Self {
+        Self {
+            chain: chain.to_le_bytes().to_vec(),
+            program_id,
+            balance: RefCell::new(HashMap::new()),
+            storage: RefCell::new(HashMap::new()),
+            ro_lock: RefCell::new(HashMap::new()),
+            syscall: Rc::new(Syscall::new()),
         }
     }
 
@@ -167,9 +178,18 @@ impl<'a> Pda<'a> {
         (key, seed)
     }
 
+    pub fn sol_wallet(&self) -> (Pubkey, Seed) {
+        let mut seed = Seed {
+            items: vec![self.chain.clone(), CONTRACT_SOL_WALLET.to_vec()],
+        };
+        let (key, bump_seed) = self.find_pda(&seed);
+        seed.add(bump_seed);
+        (key, seed)
+    }
+
     pub fn owner_info_key(&self) -> (Pubkey, Seed) {
         let mut seed = Seed {
-            items: vec![OWNER_INFO.to_vec(), upgrade_authority::ID.as_ref().to_vec()],
+            items: vec![OWNER_INFO.to_vec()],
         };
         let (key, bump_seed) = self.find_pda(&seed);
         seed.add(bump_seed);

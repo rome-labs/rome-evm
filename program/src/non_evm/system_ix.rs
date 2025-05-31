@@ -7,14 +7,12 @@ use {
         rent::Rent, sysvar::Sysvar,
     },
     crate::{
-        error::{Result, RomeProgramError::*,}, U256, non_evm::{
-            get_vec_slices, aux::decode_item,
-        }, origin::Origin,
+        error::{Result, RomeProgramError::*,}, U256, origin::Origin,
         H160, pda::Seed,
     },
-    super::{next, Bind, len_eq, get_pubkey,},
+    super::{next, Bind, len_eq,},
     std::{
-        convert::TryFrom, str::FromStr,
+        convert::TryFrom,
     },
 };
 
@@ -44,7 +42,7 @@ impl CreateA {
         Ok((ix, seed))
     }
 
-    pub fn emulate(lamports: u64, len: u64, owner: &Pubkey, binds: Vec<Bind>) -> Result<Vec<u8>> {
+    pub fn emulate(lamports: u64, len: u64, owner: &Pubkey, binds: Vec<Bind>) -> Result<()> {
         let iter  = &mut binds.into_iter();
 
         let (&signer_key, signer) = next(iter)?;
@@ -53,7 +51,7 @@ impl CreateA {
         signer.lamports = signer
             .lamports
             .checked_sub(lamports)
-            .ok_or(InsufficientSOLs(signer_key))?;
+            .ok_or(InsufficientLamports(signer_key, lamports))?;
 
         if !(new.lamports == 0 && new.data.is_empty() && system_program::ID == new.owner) {
             return Err(AccountAlreadyExists(new_key))
@@ -63,7 +61,7 @@ impl CreateA {
         new.data.resize(len as usize, 0);
         new.owner = *owner;
 
-        Ok(new_key.to_bytes().to_vec())
+        Ok(())
     }
 }
 pub struct Allocate();
@@ -95,7 +93,10 @@ impl Allocate {
 pub struct Transfer();
 impl Transfer {
     pub const ABI_LEN: usize = 32*3;
-    pub fn new_from_abi<T: Origin>(state: &T, caller: &H160, abi: &[u8]
+    pub fn new_from_abi<T: Origin>(
+        state: &T, 
+        caller: &H160, 
+        abi: &[u8]
     ) -> Result<(Instruction, Seed)> {
 
         len_eq!(abi, Transfer::ABI_LEN);
@@ -111,7 +112,6 @@ impl Transfer {
             .pda
             .from_balance_key(caller, salt);
 
-        solana_program::msg!("AUTH +++++  {}  {}", auth, hex::encode(salt));
         let ix = transfer(&auth, &to, lamports);
 
         Ok((ix, seed))
@@ -122,11 +122,6 @@ impl Transfer {
 
         if auth == to {
             return Ok(())
-        }
-
-        // TODO
-        if binds.len() != ix.accounts.len() {
-            return Err(InvalidNonEvmInstructionData)
         }
 
         let iter  = &mut binds.into_iter();
@@ -141,7 +136,7 @@ impl Transfer {
             .1
             .lamports
             .checked_sub(lamports)
-            .ok_or(InsufficientSOLs(*from.0))?;
+            .ok_or(InsufficientLamports(*from.0, lamports))?;
 
         to.1.lamports = to
             .1
@@ -184,48 +179,6 @@ impl Assign {
     }
 }
 
-pub fn find_pda(abi: &[u8]) -> Result<Vec<u8>> {
-
-    let program_id = get_pubkey(abi)?;
-    let seeds = get_vec_slices(abi, 32)?;
-
-    let (key, bump) = Pubkey::find_program_address(seeds.as_slice(), &program_id);
-
-    #[allow(unused_assignments)]
-    let mut val = Vec::with_capacity(32*2);
-    val = key.to_bytes().to_vec();
-    val.resize(64, 0);
-    *val.last_mut().unwrap() = bump;
-
-    Ok(val)
-}
-
-pub fn bytes32_to_base58(abi: &[u8]) -> Result<Vec<u8>> {
-    len_eq!(abi, 32);
-    let key = Pubkey::try_from(abi).unwrap();
-    let b58 = format!("{}", key);
-
-    let offset: U256 = 32.into();
-    let len: U256 = b58.len().into();
-
-    let mut vec = vec![0_u8; 64];
-    offset.to_big_endian(&mut vec[0..32]);
-    len.to_big_endian(&mut vec[32..]);
-
-    let mut a = b58.as_bytes().to_vec();
-    vec.append(&mut a);
-    Ok(vec)
-}
-
-pub fn base58_to_bytes32(abi: &[u8]) -> Result<Vec<u8>> {
-    let b58 = decode_item(abi, 0)?;
-    let str = std::str::from_utf8(b58)
-        .map_err(|_| InvalidNonEvmInstructionData)?;
-
-    let key = Pubkey::from_str(&str)?;
-    Ok(key.to_bytes().to_vec())
-}
-
 #[cfg(not(target_os = "solana"))]
 fn is_zeroed(buf: &[u8]) -> bool {
     const ZEROS_LEN: usize = 1024;
@@ -238,4 +191,63 @@ fn is_zeroed(buf: &[u8]) -> bool {
             && chunks.remainder() == &ZEROS[..chunks.remainder().len()]
     }
 }
+
+#[cfg(feature = "single-state")]
+mod single_state_mod {
+    use {
+        solana_program::pubkey::Pubkey,
+        crate::{len_eq, U256, error::RomeProgramError::InvalidNonEvmInstructionData,
+            non_evm::{get_pubkey, get_vec_slices, aux::decode_item,},
+        },
+        std::{
+            convert::TryFrom, str::FromStr,
+        },
+    };
+
+    pub fn find_pda(abi: &[u8]) -> crate::error::Result<Vec<u8>> {
+
+        let program_id = get_pubkey(abi)?;
+        let seeds = get_vec_slices(abi, 32)?;
+
+        let (key, bump) = Pubkey::find_program_address(seeds.as_slice(), &program_id);
+
+        #[allow(unused_assignments)]
+        let mut val = Vec::with_capacity(32*2);
+        val = key.to_bytes().to_vec();
+        val.resize(64, 0);
+        *val.last_mut().unwrap() = bump;
+
+        Ok(val)
+    }
+
+    pub fn bytes32_to_base58(abi: &[u8]) -> crate::error::Result<Vec<u8>> {
+        len_eq!(abi, 32);
+        let key = Pubkey::try_from(abi).unwrap();
+        let b58 = format!("{}", key);
+
+        let offset: U256 = 32.into();
+        let len: U256 = b58.len().into();
+
+        let mut vec = vec![0_u8; 64];
+        offset.to_big_endian(&mut vec[0..32]);
+        len.to_big_endian(&mut vec[32..]);
+
+        let mut a = b58.as_bytes().to_vec();
+        vec.append(&mut a);
+        Ok(vec)
+    }
+    pub fn base58_to_bytes32(abi: &[u8]) -> crate::error::Result<Vec<u8>> {
+        let b58 = decode_item(abi, 0)?;
+        let str = std::str::from_utf8(b58)
+            .map_err(|_| InvalidNonEvmInstructionData)?;
+
+        let key = Pubkey::from_str(&str)?;
+        Ok(key.to_bytes().to_vec())
+    }
+}
+#[cfg(feature = "single-state")]
+pub use single_state_mod::*;
+
+
+
 

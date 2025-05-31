@@ -8,6 +8,8 @@ edition = "2018"
 default = ["custom-heap"]
 custom-heap = []
 no-entrypoint = []
+single-state = []
+testnet = []
 
 [dependencies]
 evm = { workspace = true }

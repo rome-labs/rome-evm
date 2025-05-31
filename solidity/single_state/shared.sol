@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity <=0.8.28;
+pragma solidity ^0.8.20;
 
 import "./interface.sol";
 
 contract Shared {
+    error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
+
 
     function bytes32_to_bytes(bytes32 src) internal pure returns (bytes memory) {
         bytes memory dst = new bytes(32);
@@ -64,6 +66,13 @@ contract Shared {
             mes := add(_returnData, 0x04)
         }
         return abi.decode(mes, (string));
+    }
+
+    function toUint64(uint256 value) internal pure returns (uint64) {
+        if (value > type(uint64).max) {
+            revert SafeCastOverflowedUintDowncast(64, value);
+        }
+        return uint64(value);
     }
 }
 

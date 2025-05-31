@@ -1,17 +1,12 @@
 use {
-    crate::{error::{Result, RomeProgramError::*},  Account, U256,},
+    crate::{error::{Result, RomeProgramError::*}, U256,},
     solana_program::{
-        instruction::AccountMeta, pubkey::Pubkey, program_error::ProgramError, msg,
+        pubkey::Pubkey, program_error::ProgramError, msg,
     },
     super:: Bind,
     std::{
-        collections::HashMap, convert::TryFrom,
+        convert::TryFrom,
     }
-};
-#[cfg(not(target_os = "solana"))]
-use {
-    solana_program::instruction::Instruction,
-    super::{SplToken, ASplToken, System, Program},
 };
 
 #[macro_export]
@@ -42,33 +37,12 @@ macro_rules! val_eq {
 pub use len_eq;
 pub use len_ge;
 
-#[cfg(not(target_os = "solana"))]
-pub fn dispatcher<'a, T: crate::origin::Origin>(ix: &Instruction, state: &'a T) -> Box<dyn Program + 'a> {
-    use solana_program::system_program;
-
-    match ix.program_id {
-        ::spl_token::ID => Box::new(SplToken::new(state)),
-        spl_associated_token_account::ID => Box::new(ASplToken::new(state)),
-        system_program::ID => Box::new(System::new(state)),
-        _ => unimplemented!()
-    }
-}
 
 pub fn next<'a, I: Iterator<Item = Bind<'a>>>(iter: &mut I) -> Result<I::Item> {
     iter
         .next()
         .ok_or(ProgramError::NotEnoughAccountKeys.into())
 }
-
-pub fn accounts_mut<'b>(meta: &[AccountMeta], map: &'b mut HashMap<Pubkey, Account>) -> Vec<(&'b Pubkey, &'b mut Account)> {
-    map
-        .iter_mut()
-        .filter(|(&key, _)|
-            meta.iter().any(|m| m.pubkey == key)
-        )
-        .collect::<Vec<_>>()
-}
-
 
 pub fn get_pubkey(src: &[u8]) -> Result<Pubkey> {
     len_ge!(src, 32);

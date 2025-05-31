@@ -1,69 +1,54 @@
+use solana_program::pubkey::Pubkey;
 use {
-    super::{AccountLock, Context},
+    super::AccountLock,
     crate::{
-        accounts::Iterations,
-        error::Result,
-        state::{origin::Origin, Allocate},
-        tx::tx::Tx,
-        vm::{vm_iterative::MachineIterative, Vm},
-        State,
+        error::{Result, RomeProgramError::AccountLocked, },
+        state::State, Data, Lock,
     },
-    evm::{H160, H256},
+    solana_program::account_info::AccountInfo,
 };
 
-pub struct ContextAtomic<'a, 'b> {
+pub struct ContextAt<'a, 'b> {
     pub state: &'b State<'a>,
-    pub rlp: &'b [u8],
-    pub fee_addr: Option<H160>,
 }
-impl<'a, 'b> ContextAtomic<'a, 'b> {
-    pub fn new(state: &'b State<'a>, rlp: &'b [u8], fee_addr: Option<H160>) -> Self {
+impl<'a, 'b> ContextAt<'a, 'b> {
+    pub fn new(state: &'b State<'a>) -> Self {
         Self {
             state,
-            rlp,
-            fee_addr,
         }
     }
 }
 
-impl<'a, 'b> Context for ContextAtomic<'a, 'b> {
-    fn tx(&self) -> Result<Tx> {
-        Tx::from_instruction(self.rlp)
+impl<'a, 'b> AccountLock for ContextAt<'a, 'b> {
+    fn lock(&self) -> Result<()> {
+        for &info in self.state.all().values() {
+            lock_impl(info, self.state.program_id)?;
+        }
+
+        Ok(())
     }
-    fn save_iteration(&self, _: Iterations) -> Result<()> {
+    fn locked(&self) -> Result<bool> {
         unreachable!()
     }
-    fn restore_iteration(&self) -> Result<Iterations> {
+    fn unlock(&self) -> Result<()> {
         unreachable!()
     }
-    fn serialize<T: Origin + Allocate, L: AccountLock + Context>(
-        &self,
-        _: &Vm<T, MachineIterative, L>,
-    ) -> Result<()> {
-        unreachable!()
+    fn lock_new_one(&self, _info: &AccountInfo) -> Result<()> {
+        Ok(())
     }
-    fn deserialize<T: Origin + Allocate, L: AccountLock + Context>(
-        &self,
-        _: &mut Vm<T, MachineIterative, L>,
-    ) -> Result<()> {
-        unreachable!()
+    fn check_writable(&self, _info: &AccountInfo) -> Result<()> {
+        Ok(())
     }
-    fn allocate_holder(&self) -> Result<()> {
-        unreachable!()
+}
+
+pub fn lock_impl(info: &AccountInfo, program_id: &Pubkey) -> Result<()> {
+    // existings locks can only affect writable accounts of the atomic tx
+    if Lock::is_managed(info, program_id)? && info.is_writable {
+        let lock = Lock::from_account_mut(info)?;
+        if lock.get()?.is_some() {
+            return Err(AccountLocked(*info.key, lock.lock));
+        }
     }
-    fn new_session(&self) -> Result<()> {
-        unreachable!()
-    }
-    fn exists_session(&self) -> Result<bool> {
-        unreachable!()
-    }
-    fn tx_hash(&self) -> H256 {
-        unreachable!()
-    }
-    fn fee_recipient(&self) -> Option<H160> {
-        self.fee_addr
-    }
-    fn state_holder_len(&self) -> Result<usize> {
-        unreachable!()
-    }
+
+    Ok(())
 }

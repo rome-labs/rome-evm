@@ -76,6 +76,9 @@ impl Base for Eip2930 {
     fn access_list(&self) -> Option<&AccessList> {
         Some(&self.access_list)
     }
+    fn mint(&self) -> U256 {
+        unreachable!()
+    }
 }
 impl Eip2930 {
     pub fn rlp_at_chain_id(rlp: &rlp::Rlp) -> crate::error::Result<U256> {

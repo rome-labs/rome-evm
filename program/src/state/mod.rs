@@ -17,17 +17,3 @@ pub use journal::*;
 pub use journaled_state::*;
 pub use state::*;
 
-pub fn precompiled_contract(address: evm::H160) -> bool {
-    let address = address.0;
-
-    for i in &address[1..] {
-        if *i != 0 {
-            return false;
-        }
-    }
-    if address[0] >= 0x01 && address[0] <= 0x09 {
-        return true;
-    }
-
-    false
-}

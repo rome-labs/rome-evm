@@ -30,7 +30,7 @@ impl Stubs {
                 sysvar::rent::ID => {
                     stubs.rent = bincode::deserialize(&acc.data)?;
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
 

@@ -2,12 +2,12 @@ mod snapshot;
 #[allow(clippy::module_inception)]
 mod vm;
 pub mod vm_atomic;
-#[cfg(not(target_os = "solana"))]
-pub mod vm_eth_call;
 pub mod vm_iterative;
 
 pub use snapshot::*;
 pub use vm::*;
+pub use vm_atomic::*;
+pub use vm_iterative::*;
 
 use crate::error::Result;
 
@@ -21,8 +21,3 @@ pub trait Execute<T> {
     fn consume(&mut self, a: T) -> Result<()>;
 }
 
-pub enum MachineEthCall {
-    Init,
-    Execute,
-    Exit,
-}

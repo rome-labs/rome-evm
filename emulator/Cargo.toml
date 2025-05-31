@@ -4,12 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+single-state = ["rome-evm/single-state"]
+testnet = ["rome-evm/testnet"]
+default = []
 
 [dependencies]
 rome-evm = {path = "../program", features = ["no-entrypoint"]}
 solana-program = { workspace = true }
 solana-client = { workspace = true }
 bincode = { workspace = true }
+spl-token = { workspace = true }
+spl-associated-token-account = { workspace = true }
 
 [lib]
 name = "emulator"

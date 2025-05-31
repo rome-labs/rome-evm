@@ -1,7 +1,7 @@
 use {
     crate::{
         accounts::Data,
-        context::account_lock::AccountLock,
+        context::AccountLock,
         error::{Result, RomeProgramError::*},
         state::State,
         AccountState, Code, Storage, Valids,

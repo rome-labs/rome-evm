@@ -12,7 +12,7 @@ use {
     blake2f::*, ecadd::*, ecmul::*, ecpairing::*, ecrecover::*, identity::*, ripemd_160::*, sha2_256::*,
     evm::H160,
     crate::{
-        non_evm::{Program, SplToken, ASplToken, System,},
+        non_evm::{Program, SplToken, ASplToken, System, Withdraw,},
         origin::Origin,
     }
 };
@@ -39,13 +39,15 @@ pub fn non_evm_program<'a, T:Origin>(address: &H160, state: &'a T) -> Option<Box
         _ if *address == SplToken::<'a, T>::ADDRESS => Some(Box::new(SplToken::new(state))),
         _ if *address == ASplToken::<'a, T>::ADDRESS => Some(Box::new(ASplToken::new(state))),
         _ if *address == System::<'a, T>::ADDRESS => Some(Box::new(System::new(state))),
+
+        _ if *address == Withdraw::<'a, T>::ADDRESS => Some(Box::new(Withdraw::new(state))),
         _ => None
     }
 }
 
 macro_rules! impl_contract {
     ($name:ident, $address:expr) => {
-        use crate::{non_evm::Program, error::Result};
+        use crate::{non_evm::{Program, NonEvmState}, error::Result};
 
         pub struct $name();
 
@@ -54,8 +56,11 @@ macro_rules! impl_contract {
         }
 
         impl Program for $name {
-            fn eth_call(&self, input: &[u8]) -> Result<Vec<u8>> {
+            fn eth_call(&self, input: &[u8], _: &NonEvmState) -> Result<Vec<u8>> {
                 Ok(contract(input))
+            }
+            fn found_eth_call(&self, _: &[u8]) -> bool {
+                true
             }
         }
     };

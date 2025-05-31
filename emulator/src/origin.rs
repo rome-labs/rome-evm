@@ -1,19 +1,20 @@
 use {
-    crate::state::{State,},
+    crate::{ state::{State,}, Item},
     rome_evm::{
-        context::account_lock::AccountLock,
+        context::AccountLock,
         error::{Result, RomeProgramError::*},
         info::Info,
         origin::Origin,
-        non_evm::dispatcher,
-        Base, Code, Data, Account, H160, H256, U256, pda::Seed, non_evm::NonEvmState,
+        Base, Code, Data, Account, H160, H256, U256, pda::Seed,
+        non_evm::{ASplToken, Program, SplToken, System, Bind as Bind_,
+                  non_evm_state::filter_accounts},
     },
     solana_program::{
         account_info::IntoAccountInfo, clock::Slot, instruction::Instruction, pubkey::Pubkey,
         sysvar::recent_blockhashes,
     },
     std::{
-        cmp::Ordering::{Greater, Less},
+        cmp::Ordering::{Greater, Less}, cell::RefMut, collections::BTreeMap
     },
 };
 
@@ -91,7 +92,7 @@ impl Origin for State<'_> {
 
         match len.cmp(&required) {
             Less => {
-                self.realloc(&mut bind, required)?;
+                self.realloc(&bind.0, required)?;
             }
             Greater => {
                 // TODO: implement deallocation of the unused contract space
@@ -108,6 +109,7 @@ impl Origin for State<'_> {
             _ => {}
         }
 
+        let mut bind = self.info_addr(address, false)?;
         let info = bind.into_account_info();
         Info::set_code(self, &info, code, valids, address, context)?;
         self.update(bind);
@@ -141,26 +143,9 @@ impl Origin for State<'_> {
         Ok(bind.1)
     }
 
-    fn invoke_signed(&self, ix: &Instruction, _: Seed) -> Result<()> {
-
-        let f_len = |vec: &Vec<(&Pubkey, &mut Account)>| -> Vec<usize>{
-            vec
-                .iter()
-                .map(|(_, a)| a.data.len())
-                .collect::<Vec<usize>>()
-        };
-
-        let f_len_dif = |a: &Vec<usize>, b: &Vec<usize>| -> usize {
-            a
-                .iter()
-                .zip(b)
-                .map(|(&x, &y)| x.saturating_sub(y))
-                .collect::<Vec<usize>>()
-                .iter()
-                .sum()
-        };
-
+    fn invoke_signed(&self, ix: &Instruction, _: &Seed, refund_to_signer: bool) -> Result<()> {
         let _ = self.info_program(&ix.program_id)?;
+        let signer = &self.signer.unwrap();
 
         for meta in ix.accounts.iter() {
             let _ = self.info_external(&meta.pubkey, meta.is_writable)?;
@@ -168,31 +153,32 @@ impl Origin for State<'_> {
 
         let mut accs = self.accounts.borrow_mut();
 
-        let iter = accs
-            .iter_mut()
-            .map(|(a, b )| (a, &mut b.account));
-        let binds = NonEvmState::filter_accounts(iter, ix)?;
+        let lmp_old = lamports(&mut accs, &signer)?;
+        let binds = filter(&mut accs, ix)?;
+        let len_old = data_len(&binds);
 
-        let old = f_len(&binds);
-        let program = dispatcher(ix, self);
+        let program = non_evm_program(ix, self);
 
-        program.emulate(ix, binds)?;
+        if refund_to_signer {
+            program.emulate(ix, binds)?;
 
-        // TODO remove the code duplication
-        let iter = accs
-            .iter_mut()
-            .map(|(a, b )| (a, &mut b.account));
-        let binds = NonEvmState::filter_accounts(iter, ix)?;
+            let lmp_new = lamports(&mut accs, &signer)?;
 
-        let new = f_len(&binds);
-        let alloc = f_len_dif(&new, &old);
-        let dealloc = f_len_dif(&old, &new);
+            if lmp_old > lmp_new {
+                self.add_fee(lmp_old - lmp_new)?;
+            } else {
+                self.add_refund(lmp_new - lmp_old)?;
+            }
+        } else {
+            program.emulate(ix, binds)?;
+        }
 
-        Base::inc_alloc(&self.base, alloc)?;
-        Base::inc_alloc_payed(&self.base, alloc)?;
-        Base::inc_dealloc(&self.base, dealloc)?;
-        Base::inc_dealloc_payed(&self.base, dealloc)?;
+        let binds = filter(&mut accs, ix)?;
+        let len_new = data_len(&binds);
+        let alloc = data_len_diff(&len_new, &len_old);
+        let dealloc = data_len_diff(&len_old, &len_new);
 
+        self.inc_space_counter(alloc, dealloc, refund_to_signer)?;
         self.syscall.inc();
         Ok(())
     }
@@ -200,4 +186,49 @@ impl Origin for State<'_> {
     fn signer(&self) -> Pubkey {
         self.signer.unwrap()
     }
+}
+
+
+fn non_evm_program<'a, T: Origin>(ix: &Instruction, state: &'a T) -> Box<dyn Program + 'a> {
+    use solana_program::system_program;
+
+    match ix.program_id {
+        ::spl_token::ID => Box::new(SplToken::new(state)),
+        spl_associated_token_account::ID => Box::new(ASplToken::new(state)),
+        system_program::ID => Box::new(System::new(state)),
+        _ => unimplemented!()
+    }
+}
+
+fn data_len(vec: &Vec<Bind_>) -> Vec<usize>{
+    vec
+        .iter()
+        .map(|(_, a)| a.data.len())
+        .collect::<Vec<usize>>()
+}
+
+fn data_len_diff(a: &Vec<usize>, b: &Vec<usize>) -> usize{
+    a
+        .iter()
+        .zip(b)
+        .map(|(&x, &y)| x.saturating_sub(y))
+        .collect::<Vec<usize>>()
+        .iter()
+        .sum()
+}
+
+fn filter<'a>(accs: &'a mut RefMut<BTreeMap<Pubkey, Item>>, ix: &Instruction) -> Result<Vec<Bind_<'a>>>{
+    let iter = accs
+        .iter_mut()
+        .map(|(a, b )| (a, &mut b.account));
+
+    filter_accounts(iter, ix)
+}
+fn lamports<'a>(accs: &'a mut RefMut<BTreeMap<Pubkey, Item>>, key: &Pubkey) -> Result<u64>{
+    let lamports = accs
+        .get(&key)
+        .ok_or(AccountNotFound(*key))?
+        .account
+        .lamports;
+    Ok(lamports)
 }

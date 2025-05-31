@@ -7,7 +7,7 @@ use {
     crate::{
         error::Result, origin::Origin, error::RomeProgramError::*, non_evm::Bind,
     },
-    super::{Program, next, SplToken, System, ASplToken, len_eq},
+    super::{Program, next, SplToken, System, spl_pda, len_eq},
     std::{
         convert::TryFrom,
     },
@@ -35,9 +35,8 @@ impl Create {
 
     pub fn emulate<T: Origin>(
         state: &T,
-
         binds: Vec<Bind>
-    ) -> Result<Vec<u8>> {
+    ) -> Result<()> {
         let iter = &mut binds.into_iter();
         let signer = next(iter)?;
         let new = next(iter)?;
@@ -46,7 +45,7 @@ impl Create {
         let _ = next(iter)?;
         let spl_program = next(iter)?.0;
 
-        let (key, _) = ASplToken::<T>::pda(owner, mint.0, spl_program);
+        let (key, _) = spl_pda(owner, mint.0, spl_program);
 
         if key != *new.0 {
             return Err(AccountsMismatch(*new.0, key))
@@ -65,6 +64,6 @@ impl Create {
         let ix = initialize_account3(&spl_token::ID, new.0, mint.0, owner)?;
         SplToken::new(state).emulate(&ix, vec![(new.0, new.1), mint])?;
 
-        Ok(new.0.to_bytes().to_vec())
+        Ok(())
     }
 }

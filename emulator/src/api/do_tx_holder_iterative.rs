@@ -1,6 +1,6 @@
 use {
     super::{do_tx_iterative::iterative_tx, Emulation},
-    crate::{context::ContextIterative, state::State},
+    crate::{context::ContextIt, state::State},
     rome_evm::{
         api::{split_fee, split_hash, split_u64},
         error::Result,
@@ -37,6 +37,6 @@ pub fn do_tx_holder_iterative<'a>(
     let info = bind.into_account_info();
     let rlp = Holder::rlp(&info, hash, chain)?;
 
-    let context = ContextIterative::new(&state, holder, hash, session, fee_addr, &rlp)?;
-    iterative_tx(&state, context)
+    let context = ContextIt::new(&state, holder, hash, session, fee_addr, &rlp, true)?;
+    iterative_tx(&state, context, false)
 }

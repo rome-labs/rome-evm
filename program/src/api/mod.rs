@@ -1,4 +1,4 @@
-pub mod create_balance;
+pub mod deposit;
 mod do_tx;
 pub mod do_tx_holder;
 pub mod do_tx_holder_iterative;
@@ -6,7 +6,7 @@ pub mod do_tx_iterative;
 pub mod reg_owner;
 pub mod transmit_tx;
 
-pub use create_balance::create_balance;
+pub use deposit::deposit;
 pub use do_tx::do_tx;
 pub use do_tx_holder::do_tx_holder;
 pub use do_tx_holder_iterative::do_tx_holder_iterative;

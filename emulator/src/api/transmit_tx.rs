@@ -17,26 +17,34 @@ pub fn transmit_tx<'a>(
 
     let (holder, from, ix_hash, chain, tx) = args(data)?;
     let state = State::new(program_id, Some(*signer), client, chain)?;
-    let mut bind = state.info_tx_holder(holder, true)?;
-
-    let (filled_len, header, hash) = {
-        let info = bind.into_account_info();
-        let len = Holder::from_account(&info)?.len();
-        let header = Holder::offset(&info);
-        let hash = TxHolder::from_account(&info)?.hash;
-        (len, header, hash)
-    };
 
     let _sys_acc = state.info_sys(&system_program::ID)?;
     // TODO: the client side should implement the holder filling with taking into account holder header allocation
-    let to = from + tx.len();
-    if hash != ix_hash || to > filled_len {
-        state.realloc(&mut bind, header + to)?;
-    }
-    {
+    let len = from + tx.len();
+
+    let (filled_len, header, reset, key) = {
+        let mut bind = state.info_tx_holder(holder, true)?;
         let info = bind.into_account_info();
-        Holder::fill(&info, hash, from, to, tx)?;
+        let reset = TxHolder::from_account(&info)?.hash != ix_hash;
+
+        if reset {
+            TxHolder::reset(&info, ix_hash)?;
+        }
+        TxHolder::inc_iteration(&info)?;
+
+        let filled_len = Holder::from_account(&info)?.len();
+        let header = Holder::offset(&info);
+
+        (filled_len, header, reset, bind.0)
+    };
+
+    if reset || len > filled_len {
+        state.realloc(&key, header + len)?;
     }
+
+    let mut bind = state.info_tx_holder(holder, false)?;
+    let info = bind.into_account_info();
+    Holder::fill(&info, from, len, tx)?;
     state.update(bind);
 
     Emulation::without_vm(&state)

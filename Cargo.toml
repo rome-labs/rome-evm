@@ -4,9 +4,7 @@ members = [
     "emulator",
     "program",
 ]
-exclude = [
-    "evm"
-]
+
 resolver = "2"
 
 [workspace.dependencies]

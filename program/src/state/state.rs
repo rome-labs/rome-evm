@@ -3,14 +3,15 @@ use {
         base::Base,
         pda::{Pda, Seed},
     },
-    crate::{error::RomeProgramError::*, error::*, AccountType, OwnerInfo},
+    crate::{error::RomeProgramError::*, error::*, AccountType, OwnerInfo, Data},
     evm::{H160, U256},
     solana_program::{
-        account_info::AccountInfo, program::invoke_signed, pubkey::Pubkey, rent::Rent,
+        account_info::AccountInfo, pubkey::Pubkey, rent::Rent,
         system_instruction, system_program, sysvar::recent_blockhashes, sysvar::Sysvar,
     },
     std::{cmp::Ordering::*, collections::HashMap, iter::FromIterator, ops::Deref},
 };
+use crate::origin::Origin;
 
 pub struct State<'a> {
     all: HashMap<Pubkey, &'a AccountInfo<'a>>,
@@ -105,6 +106,38 @@ impl<'a> State<'a> {
         AccountType::is_ok(info, typ, self.program_id)?;
         Ok(info)
     }
+
+    pub fn info_sol_wallet(&self, or_create: bool) -> Result<&'a AccountInfo<'a>>{
+        let (key, seed) = self.pda.sol_wallet();
+        let info = self
+            .all
+            .get(&key)
+            .cloned()
+            .ok_or(AccountNotFound(key))?;
+
+        if info.lamports() == 0  {
+            if !or_create {
+                return Err(AccountNotFound(*info.key))
+            }
+
+            assert_eq!(info.data_len(), 0);
+            assert!(info.is_writable);
+            assert_eq!(*info.owner, system_program::ID);
+
+            let rent = Rent::get()?.minimum_balance(0);
+            let ix = &system_instruction::create_account(
+                self.signer.key,
+                info.key,
+                rent,
+                0,
+                &system_program::ID,
+            );
+            self.invoke_signed(&ix, &seed, false)?;
+            assert!(info.lamports() > 0);
+        }
+
+        Ok(info)
+    }
     pub fn info_sys(&self, key: &Pubkey) -> Result<&'a AccountInfo<'a>> {
         for id in [&recent_blockhashes::ID, &system_program::ID] {
             if key == id {
@@ -138,24 +171,24 @@ impl<'a> State<'a> {
         } else {
             self.inc_dealloc(info.data_len().saturating_sub(len))?
         }
+
         info.realloc(len, false)?;
+
         let rent = Rent::get()?.minimum_balance(info.data_len());
+        let is_paid = AccountType::from_account(info)?.is_paid();
 
         match rent.cmp(&info.lamports()) {
             Greater => {
-                let sys = self.info_sys(&system_program::ID)?;
-
-                invoke_signed(
-                    &system_instruction::transfer(self.signer.key, info.key, rent - info.lamports()),
-                    &[self.signer.clone(), info.clone(), sys.clone()],
-                    &[],
-                )?;
-                self.syscall.inc();
+                let ix = system_instruction::transfer(self.signer.key, info.key, rent - info.lamports());
+                self.invoke_signed(&ix, &Seed::default(), is_paid)?;
             }
             Less => {
                 let refund = info.lamports() - rent;
                 **info.try_borrow_mut_lamports()? -= refund;
                 **self.signer.try_borrow_mut_lamports()? += refund;
+                if is_paid {
+                    self.add_refund(refund)?;
+                }
             }
             _ => {}
         }
@@ -174,24 +207,20 @@ impl<'a> State<'a> {
         assert!(pda.is_writable);
         assert_eq!(*pda.owner, system_program::ID);
 
-        let system = self.info_sys(&system_program::ID)?;
         let len = Pda::empty_size(pda, typ);
         let rent = Rent::get()?.minimum_balance(len);
-        invoke_signed(
-            &system_instruction::create_account(
-                self.signer.key,
-                pda.key,
-                rent,
-                len as u64,
-                self.program_id,
-            ),
-            &[self.signer.clone(), pda.clone(), system.clone()],
-            &[seed.cast().as_slice()],
-        )?;
-        self.syscall.inc();
+
+        let ix = system_instruction::create_account(
+            self.signer.key,
+            pda.key,
+            rent,
+            len as u64,
+            self.program_id,
+        );
+
+        self.invoke_signed(&ix, seed, typ.is_paid())?;
         assert_eq!(pda.owner, self.program_id);
         self.inc_alloc(len)?;
-
         Pda::init(pda, typ)
     }
     pub fn all(&self) -> &HashMap<Pubkey, &'a AccountInfo<'a>> {

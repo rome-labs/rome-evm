@@ -1,11 +1,11 @@
 use {
     crate::{
-        context::ContextIterative,
+        context::ContextIt,
         error::{Result, RomeProgramError::InvalidInstructionData},
         split_fee, split_u64,
         state::State,
         tx::tx::Tx,
-        vm::{vm_iterative::MachineIterative::FromStateHolder, Execute, Vm},
+        vm::{vm_iterative::MachineIt::FromStateHolder, Execute, VmIt},
         H160, H256,
     },
     solana_program::{account_info::AccountInfo, keccak, msg, pubkey::Pubkey},
@@ -40,7 +40,7 @@ pub fn do_tx_iterative<'a>(
     let chain_id = Tx::chain_id_from_rlp(rlp)?;
 
     let state = State::new(program_id, accounts, chain_id)?;
-    let context = ContextIterative::new(
+    let context = ContextIt::new(
         &state,
         accounts,
         holder,
@@ -49,7 +49,8 @@ pub fn do_tx_iterative<'a>(
         hash,
         session,
         fee_addr,
+        None,
     )?;
-    let mut vm = Vm::new_iterative(&state, &context)?;
+    let mut vm = VmIt::new(&state, &context)?;
     vm.consume(FromStateHolder)
 }

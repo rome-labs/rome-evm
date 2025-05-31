@@ -28,54 +28,26 @@ services:
   tests:
     container_name: tests
     image: romelabs/tests:${TESTS_REF_NAME:-latest}
+    entrypoint: /bin/bash -c "/bin/bash -c \"$${@}\""
+    command: >
+      /bin/sh -c
+      "
+      sleep 10 &&
+      /opt/bin/solana-keygen new --no-bip39-passphrase --silent;
+      /opt/bin/solana -u http://solana:8899 -v airdrop 1000 /opt/ci/keys/upgrade-authority-keypair.json;
+      /opt/bin/solana -u http://solana:8899 -v airdrop 10000000 /opt/ci/keys/test-account-keypair.json;
+      /opt/bin/evm
+      "
     environment:
       TEST_NAME: evm
+      GETH_URL: http://localhost:8545
+      PROXY_URL: http://localhost:9090
     hostname: tests
     networks:
       - net
     depends_on:
       solana:
         condition: service_started
-
-  proxy:
-    container_name: proxy
-    image: romelabs/rome-apps:${ROME_APPS:-latest}
-    hostname: proxy
-    environment:
-      SERVICE_NAME: proxy
-      PROXY_CONFIG: /opt/cfg/proxy-config.yml
-    volumes:
-      - ./keys:/opt/keys
-      - ./cfg:/opt/cfg
-    ports:
-      - 9090:9090
-    networks:
-      - net
-    depends_on:
-      solana:
-        condition: service_healthy
-    healthcheck:
-      test: [
-        CMD-SHELL,
-        "curl --location 'proxy:9090' --header 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":83}'"
-      ]
-      interval: 5s
-      timeout: 10s
-      retries: 10
-      start_period: 10s
-
-  uniswap-v2-core:
-    container_name: uniswap
-    image: romelabs/uniswap-v2-core:latest
-    environment:
-      NETWORK: proxy
-      CHAIN_ID: 1001
-    depends_on:
-      proxy:
-        condition: service_started
-    networks:
-      - net
-    entrypoint: yarn test
 
 networks:
   net:

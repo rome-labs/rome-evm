@@ -1,6 +1,6 @@
 use {
     crate::{
-        allocate::Allocate, aux::Ix, context::account_lock::AccountLock, error::Result,
+        allocate::Allocate, aux::Ix, context::AccountLock, error::{Result, RomeProgramError::*},
         origin::Origin, non_evm::NonEvmState, NUMBER_ALLOC_DIFF_PER_TX,
     },
     borsh::{BorshDeserialize, BorshSerialize},
@@ -28,6 +28,7 @@ pub struct Journal {
     pub non_evm_ix: Option<Vec<Ix>>,
     non_evm_state: Option<NonEvmState>,
     pub parent: Option<Box<Journal>>,
+    pub page: u64,
 }
 
 impl Journal {
@@ -37,6 +38,7 @@ impl Journal {
             non_evm_ix: None,
             non_evm_state: None, // lazy, cloned from parent on demand
             parent: None,
+            page: 0,
         }
     }
 
@@ -62,6 +64,7 @@ impl Journal {
 
     pub fn next_page(parent: Box<Journal>) -> Self {
         let mut new = Self::new();
+        new.page = parent.page + 1;
         new.parent = Some(parent);
         new
     }
@@ -84,9 +87,9 @@ impl Journal {
         nonce
     }
 
-    pub fn transfer_from(&self, address: &H160) -> U256 {
+    pub fn transfer_from(&self, address: &H160) -> Result<U256> {
         let mut value = if let Some(parent) = &self.parent {
-            parent.transfer_from(address)
+            parent.transfer_from(address)?
         } else {
             U256::zero()
         };
@@ -94,17 +97,17 @@ impl Journal {
         if let Some(items) = self.diff.get(address) {
             for item in items {
                 if let Diff::TransferFrom { balance } = item {
-                    value += *balance
+                    value = value.checked_add(*balance).ok_or(CalculationOverflow)?;
                 }
             }
         }
 
-        value
+        Ok(value)
     }
 
-    pub fn transfer_to(&self, address: &H160) -> U256 {
+    pub fn transfer_to(&self, address: &H160) -> Result<U256> {
         let mut value = if let Some(parent) = &self.parent {
-            parent.transfer_to(address)
+            parent.transfer_to(address)?
         } else {
             U256::zero()
         };
@@ -112,12 +115,12 @@ impl Journal {
         if let Some(items) = self.diff.get(address) {
             for item in items {
                 if let Diff::TransferTo { balance } = item {
-                    value += *balance
+                    value = value.checked_add(*balance).ok_or(CalculationOverflow)?;
                 }
             }
         }
 
-        value
+        Ok(value)
     }
 
     pub fn get_mut(&mut self, address: &H160) -> &mut Vec<Diff> {
@@ -184,9 +187,10 @@ impl Journal {
         }
 
         self.diff.serialize(into)?;
-        // TODO: exclude read-only accounts
         self.non_evm_ix.serialize(into)?;
+        // TODO: exclude read-only accounts from non_evm_state
         self.non_evm_state.serialize(into)?;
+        self.page.serialize(into)?;
         Ok(())
     }
     pub fn serialize(&self, into: &mut &mut [u8]) -> Result<()> {
@@ -203,12 +207,14 @@ impl Journal {
             let diff: BTreeMap<H160, Vec<Diff>> = BorshDeserialize::deserialize(from)?;
             let non_evm_ix: Option<Vec<Ix>> = BorshDeserialize::deserialize(from)?;
             let non_evm_state: Option<NonEvmState> = BorshDeserialize::deserialize(from)?;
+            let page: u64 = BorshDeserialize::deserialize(from)?;
 
             journal = Some(Box::new(Self {
                 diff,
                 non_evm_ix,
                 non_evm_state,
                 parent: journal,
+                page,
             }));
         }
 
@@ -258,7 +264,7 @@ impl Journal {
             for ix_ in invokes {
                 let (ix, seed) = ix_.cast();
                 msg!("InvokeSigned {}", &ix.program_id);
-                state.invoke_signed(&ix, seed)?;
+                state.invoke_signed(&ix, &seed, true)?;
             }
         }
 
@@ -394,5 +400,21 @@ impl Journal {
         } else {
             false
         }
+    }
+
+    pub fn revert_page(&mut self, page: u64) -> Self {
+        if let Some(mut parent) = self.parent.take() {
+            if parent.page < page {
+                *parent
+            } else {
+                parent.revert_page(page)
+            }
+        } else {
+            Journal::new()
+        }
+    }
+
+    pub fn merge_page(&mut self) {
+        self.page = self.page.checked_sub(1).expect("fm vault");
     }
 }
