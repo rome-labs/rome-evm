@@ -1,0 +1,55 @@
+name: Build
+run-name: "Build and push (no tests)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref_name:
+        type: string
+        description: 'branch name'
+        required: true
+        default: 'main'
+      assign_tag:
+        type: string
+        description: 'assign tag'
+        required: true
+        default: 'main'
+      feature:
+        type: string
+        description: 'cargo build feature: ci, mainnet, testnet'
+        required: false
+        default: 'ci'
+env:
+  REF_NAME: ${{ github.event.inputs.ref_name }}
+  TAG: ${{ github.event.inputs.assign_tag}}
+  FEATURE: ${{ github.event.inputs.feature }}
+
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on:
+      labels: ubuntu-22.04-2core-8gb-75
+    steps:
+      - name: 'Checkout rome-evm repository'
+        uses: actions/checkout@v4
+        with:
+          path: rome-evm
+          ref: ${{env.REF_NAME}}
+          token: ${{ secrets.GIT_ROLLUP_TOKEN }}
+
+      - name: 'Login to Docker Hub'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      - name: 'Build and push rome-evm'
+        uses: docker/build-push-action@v4.0.0
+        with:
+          context: .
+          push: true
+          build-args: FEATURE=${{ env.FEATURE }}
+          file: rome-evm/ci/Dockerfile
+          tags: romelabs/rome-evm:${{ env.TAG }}
+          labels: romelabs/rome-evm:${{ env.TAG }}

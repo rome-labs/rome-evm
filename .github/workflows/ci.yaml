@@ -43,15 +43,6 @@ jobs:
           ref: ${{env.ROME_APPS}}
           token: ${{ secrets.GIT_ROLLUP_TOKEN }}
 
-      # - name: 'Checkout rome-relayer repository'
-      #   uses: actions/checkout@master
-      #   with:
-      #     repository: rome-labs/rome-relayer
-      #     path: rome-relayer
-      #     submodules: recursive
-      #     ref: ${{env.ROME_RELAYER_REF_NAME}}
-      #     token: ${{ secrets.GIT_ROLLUP_TOKEN }}
-
       - name: 'Checkout tests repository'
         uses: actions/checkout@master
         with:
@@ -72,28 +63,15 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Cache Docker layers
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: buildx-${{ env.REF_NAME }}
-          restore-keys: |
-            buildx-${{ env.REF_NAME }}-
-            buildx-master-
-
-      - name: 'Build rome-evm builder'
+      - name: 'Build rome-evm'
         uses: docker/build-push-action@v4.0.0
         with:
           context: .
           push: true
           file: rome-evm/ci/Dockerfile
           tags: romelabs/rome-evm:${{env.REF_NAME}}
+          build-args: FEATURE=ci
           labels: romelabs/rome-evm:${{env.REF_NAME}}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache
 
       - name: 'Build tests image'
         uses: docker/build-push-action@v4.0.0
@@ -103,8 +81,6 @@ jobs:
           file: tests/ci/Dockerfile
           tags: romelabs/tests:${{env.TESTS_REF_NAME}}
           labels: romelabs/tests:${{env.TESTS_REF_NAME}}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache
 
       - name: 'Up tests'
         run: docker-compose -f rome-evm/ci/docker-compose.yml up tests

@@ -1,5 +1,6 @@
 FROM ubuntu:24.04 as build
 
+ARG FEATURE
 RUN apt update && \
     apt upgrade -y && \
     apt install -y curl build-essential
@@ -14,8 +15,8 @@ ENV PATH=${PATH}:/root/.local/share/solana/install/active_release/bin
 COPY rome-evm /opt/rome-evm
 
 WORKDIR /opt/rome-evm/program
-RUN cargo test
-RUN cargo build-sbf
+RUN cargo test --features ${FEATURE:-ci}
+RUN cargo build-sbf --features ${FEATURE:-ci}
 
 FROM anzaxyz/agave:v2.1.7
 COPY --from=build /opt/rome-evm/target/deploy/rome_evm.so /opt/

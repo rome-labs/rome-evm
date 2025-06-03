@@ -1,7 +1,7 @@
 use {
     crate::{
         error::{Result, RomeProgramError::*},
-        upgrade_authority, Data, OwnerInfo, State,
+        registration_key, Data, OwnerInfo, State,
     },
     solana_program::{
         account_info::AccountInfo, clock::Clock, msg, pubkey::Pubkey, sysvar::Sysvar,
@@ -24,10 +24,10 @@ pub fn args(data: &[u8]) -> Result<u64> {
 }
 
 pub fn check(info: &AccountInfo, signer: &Pubkey, chain: u64) -> Result<()> {
-    if *signer != upgrade_authority::ID {
+    if *signer != registration_key::ID {
         return Err(Custom(format!(
-            "private instruction must be signed by upgrade_authority keypair: {}",
-            upgrade_authority::ID
+            "private instruction must be signed by registration keypair: {}",
+            registration_key::ID
         )));
     }
 

@@ -18,12 +18,15 @@ pub const STORAGE_LEN: usize = 256; // must be <= u8::MAX+1
 pub const CONTRACT_SOL_WALLET: &[u8] = b"CONTRACT_SOL_WALLET";
 pub const RSOL_DECIMALS: usize = 18;
 
-// rome-owner-keypair.json
-#[cfg(not(feature = "testnet"))]
-pub mod upgrade_authority {
-    solana_program::declare_id!("8q76RPN5Tm6thVoQAUFhUP2diddGgtDLA6B6eShSazB2");
+#[cfg(feature = "ci")]
+pub mod registration_key {
+    solana_program::declare_id!("9u1wj9K3o9KiDFEppSshGdNhopPBKMbzHgtJr5BMhVjD");
+}
+#[cfg(feature = "mainnet")]
+pub mod registration_key {
+    solana_program::declare_id!("RRAM82VtsXY2BTAgQU9v8JqgrcoVMAbCPBqRRH5sV2a");
 }
 #[cfg(feature = "testnet")]
-pub mod upgrade_authority {
-    solana_program::declare_id!("RD1B5ZirpFv5HpuUWbzrRH9eV5dyrQrnCji7AoTQYF8");
+pub mod registration_key {
+    solana_program::declare_id!("RRATMVCuWw4XpjyvGdELvCTcXdMMJQWzL1heAGXEpxq");
 }

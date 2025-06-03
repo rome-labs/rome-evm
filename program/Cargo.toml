@@ -10,6 +10,8 @@ custom-heap = []
 no-entrypoint = []
 single-state = []
 testnet = []
+mainnet = []
+ci = []
 
 [dependencies]
 evm = { workspace = true }

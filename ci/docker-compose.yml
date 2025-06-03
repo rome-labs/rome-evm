@@ -34,7 +34,7 @@ services:
       "
       sleep 10 &&
       /opt/bin/solana-keygen new --no-bip39-passphrase --silent;
-      /opt/bin/solana -u http://solana:8899 -v airdrop 1000 /opt/ci/keys/upgrade-authority-keypair.json;
+      /opt/bin/solana -u http://solana:8899 -v airdrop 1000 /opt/ci/keys/registry-authority-keypair.json;
       /opt/bin/solana -u http://solana:8899 -v airdrop 10000000 /opt/ci/keys/test-account-keypair.json;
       /opt/bin/evm
       "
