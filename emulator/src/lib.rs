@@ -8,6 +8,7 @@ mod origin;
 mod state;
 mod stubs;
 mod vm_eth_call;
+mod alt_program;
 
 pub use api::*;
 pub use context::*;
@@ -22,4 +23,6 @@ entrypoint! {
     DoTxIterative => do_tx_iterative,
     DoTxHolderIterative => do_tx_holder_iterative,
     RegOwner => reg_owner,
+    AltAlloc => alt_alloc,
+    AltDealloc => alt_dealloc,
 }

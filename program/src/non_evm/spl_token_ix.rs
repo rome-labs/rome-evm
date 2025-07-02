@@ -1,18 +1,19 @@
 use {
     crate::{
-        H160, U256, error::Result, error::RomeProgramError::*, origin::Origin,
+        H160, U256, error::{Result, RomeProgramError::*}, origin::Origin,
         non_evm::{
             Bind, NonEvmState, spl_pda,
         },
     },
     spl_token::{instruction::initialize_account3, processor::Processor,},
     solana_program::{
+        program_error::ProgramError,
         instruction::{Instruction, AccountMeta}, pubkey::Pubkey, account_info::{
             AccountInfo, IntoAccountInfo,
         },
         program_pack::Pack,
     },
-    super::{len_eq,},
+    super::len_eq,
     std::{
         mem::size_of, convert::TryFrom,
     },
@@ -58,20 +59,16 @@ impl Transfer {
         spl_token::instruction::transfer(&spl_token::id(), &from, &to, &auth, &[], tokens)
             .map_err(|e| e.into())
     }
-    pub fn emulate(ix: &Instruction, binds: Vec<Bind>, amount: u64) -> Result<()> {
-        let auth = ix.accounts.get(2).unwrap().pubkey;
+    pub fn emulate(meta: &Vec<AccountMeta>, binds: &mut Vec<Bind>, amount: u64) -> Result<()> {
+        let mut info = info(meta, binds)?;
 
-        let mut info = info(&ix.accounts, binds);
-        let auth_info = info
+        let auth = info
             .get_mut(2)
-            .ok_or(InvalidNonEvmInstructionData)?;
+            .ok_or(ProgramError::NotEnoughAccountKeys)?; // is not reachable
 
-        if *auth_info.key != auth {
-            return Err(InvalidAuthority(auth))
-        }
-
-        auth_info.is_signer = true;
+        auth.is_signer = true;
         let _ = Processor::process_transfer(&spl_token::ID, &info, amount, None)?;
+
         Ok(())
     }
 }
@@ -91,21 +88,33 @@ impl InitAccount {
         let ix = initialize_account3(&spl_token::ID, &new, &mint, &owner)?;
         Ok(ix)
     }
-    pub fn emulate(ix: &Instruction, binds: Vec<Bind>, owner: &Pubkey) -> Result<()> {
-        let  info = info(&ix.accounts, binds);
+    pub fn emulate(meta: &Vec<AccountMeta>, binds: &mut Vec<Bind>, owner: &Pubkey) -> Result<()> {
+        let  info = info(meta, binds)?;
         let _ = Processor::process_initialize_account3(&spl_token::ID, &info, owner.clone())?;
         Ok(())
     }
 }
 
-pub fn info<'b>(meta: &[AccountMeta], binds: Vec<Bind<'b>>) -> Vec<AccountInfo<'b>> {
-    binds
-        .into_iter()
-        .filter(|(&key, _)|
-            meta.iter().any(|m| m.pubkey == key)
-        )
-        .map(|(k,  v)| (k, false, v).into_account_info())
-        .collect::<Vec<_>>()
+
+pub fn info<'b>(meta: &[AccountMeta], binds: &mut Vec<Bind<'b>>) -> Result<Vec<AccountInfo<'b>>> {
+    let mut infos: Vec<AccountInfo> = vec![];
+
+    for key in meta.iter().map(|x| x.pubkey) {
+        let info = if let Some(info) = infos.iter().find(|&x| *x.key == key) {
+            info.clone()
+        } else {
+            let pos = binds
+                .iter()
+                .position(|(key_, _)| **key_ == key)
+                .ok_or(InconsistentAccountList)?;
+            binds
+                .swap_remove(pos)
+                .into_account_info()
+        };
+        infos.push(info);
+    }
+
+    Ok(infos)
 }
 
 fn u64_to_bytes32(x: u64, dst: &mut [u8; 32]) {
@@ -152,6 +161,8 @@ pub fn account_raw_state(spl: spl_token::state::Account) -> Result<Vec<u8>> {
     Ok(vec)
 }
 
+
+#[allow(unused_variables)]
 pub fn balance_ge<T:Origin >(
     abi: &[u8],
     state: &T,
@@ -170,12 +181,19 @@ pub fn balance_ge<T:Origin >(
     let (spl_key, _) = spl_pda(&key, &mint, &spl_token::ID);
 
     let abi = spl_key.to_bytes();
-    let spl_acc = spl_account_state(abi.as_slice(), state, non_evm_state)?;
-    let spl_balance: U256 = spl_acc.amount.into();
 
-    if spl_balance < balance {
-        let mes = format!("SPL balance is less than expected {} {}", spl_acc.amount, balance);
-        return Err(Custom(mes))
+    #[cfg(not(target_os = "solana"))]
+    let _spl_acc = spl_account_state(abi.as_slice(), state, non_evm_state)?;
+ 
+    #[cfg(target_os = "solana")]
+    {
+        let spl_acc = spl_account_state(abi.as_slice(), state, non_evm_state)?;
+        let spl_balance: U256 = spl_acc.amount.into();
+
+        if spl_balance < balance {
+            let mes = format!("SPL balance is less than expected {} {}", spl_acc.amount, balance);
+            return Err(crate::error::RomeProgramError::Custom(mes))
+        }
     }
 
     Ok(vec![])

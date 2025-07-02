@@ -1,6 +1,6 @@
 use {
     crate::{
-        error::{Result, RomeProgramError::InconsistentAccountList},
+        error::Result,
         origin::Origin,
         state::Account,
     },
@@ -75,23 +75,11 @@ impl NonEvmState {
 }
 
 pub fn filter_accounts<'a, I: Iterator<Item = Bind<'a>>>(iter_mut: I, ix: &Instruction) -> Result<Vec<Bind<'a>>> {
-    let mut vec = iter_mut
+    let vec = iter_mut
         .filter(|(&key, _)|
             ix.accounts.iter().any(|m| m.pubkey == key)
         )
         .collect::<Vec<_>>();
 
-    // TODO fix it
-    if vec.len() != ix.accounts.len() {
-        return Err(InconsistentAccountList)
-    }
-
-    // sort
-    for (i, meta) in ix.accounts.iter().enumerate() {
-        let pos = vec.iter().position(|(&key, _)|  key == meta.pubkey ).unwrap();
-        // TODO: it panics if instruction has duplicated accounts
-        vec.swap(i, pos);
-    }
     Ok(vec)
-
 }

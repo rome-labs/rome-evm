@@ -17,7 +17,7 @@ pub use {
     withdraw::Withdraw,
     non_evm_state::{NonEvmState, Bind,},
     aux::{
-        len_ge, len_eq, next, get_vec_slices, get_pubkey,
+        len_ge, len_eq, next, get_vec_slices, get_pubkey, get_account_mut,
     },
     evm::Context,
 };
@@ -30,18 +30,9 @@ use {
 pub type EvmDiff = (H160, Diff);
 
 pub trait Program {
-    fn ix_from_abi(&self, _input: &[u8], _context: &Context) -> Result<(Instruction, Seed, Vec<EvmDiff>)> {
-        unimplemented!()
-    }
-    fn eth_call(&self, _: &[u8], _: &NonEvmState) -> Result<Vec<u8>> { unimplemented!() }
-
-    fn emulate(&self, _ix: &Instruction, _accs: Vec<Bind>) -> Result<()> {
-        unimplemented!()
-    }
-    fn found_eth_call(&self, _: &[u8]) -> bool {
-        false
-    }
-    fn transfer_allowed(&self) -> bool {
-        false
-    }
+    fn ix_from_abi(&self, _input: &[u8], _context: &Context) -> Result<(Instruction, Seed, Vec<EvmDiff>)>;
+    fn eth_call(&self, _: &[u8], _: &NonEvmState) -> Result<Vec<u8>>;
+    fn emulate(&self, _ix: &Instruction, _: &mut Vec<Bind>) -> Result<()>;
+    fn found_eth_call(&self, _: &[u8]) -> bool;
+    fn transfer_allowed(&self) -> bool;
 }

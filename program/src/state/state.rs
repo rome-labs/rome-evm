@@ -2,6 +2,7 @@ use {
     super::{
         base::Base,
         pda::{Pda, Seed},
+        origin::Origin,
     },
     crate::{error::RomeProgramError::*, error::*, AccountType, OwnerInfo, Data},
     evm::{H160, U256},
@@ -9,9 +10,8 @@ use {
         account_info::AccountInfo, pubkey::Pubkey, rent::Rent,
         system_instruction, system_program, sysvar::recent_blockhashes, sysvar::Sysvar,
     },
-    std::{cmp::Ordering::*, collections::HashMap, iter::FromIterator, ops::Deref},
+    std::{cmp::Ordering::*, collections::HashMap, iter::FromIterator, ops::Deref, cell::Ref},
 };
-use crate::origin::Origin;
 
 pub struct State<'a> {
     all: HashMap<Pubkey, &'a AccountInfo<'a>>,
@@ -85,7 +85,10 @@ impl<'a> State<'a> {
         let (key, seed) = self.pda.owner_info_key();
         self.info_pda(&key, &seed, AccountType::OwnerInfo, or_create)
     }
-
+    pub fn info_alt_slots(&self, index: u64, or_create: bool) -> Result<&'a AccountInfo<'a>> {
+        let (key, seed) = self.pda.alt_slots_key(self.signer.key, index);
+        self.info_pda(&key, &seed, AccountType::AltSlots, or_create)
+    }
     pub fn info_pda(
         &self,
         key: &Pubkey,
@@ -225,5 +228,13 @@ impl<'a> State<'a> {
     }
     pub fn all(&self) -> &HashMap<Pubkey, &'a AccountInfo<'a>> {
         &self.all
+    }
+    pub fn data(&self, key: &Pubkey) -> Result<Ref<&mut [u8]>> {
+        let info = self.all()
+            .get(&key)
+            .ok_or(AccountNotFound(*key))?;
+        let data = info.try_borrow_data()?;
+
+        Ok(data)
     }
 }

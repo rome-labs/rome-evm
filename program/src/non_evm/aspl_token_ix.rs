@@ -1,16 +1,14 @@
 use {
     solana_program::{
-        instruction::Instruction, pubkey::Pubkey, program_pack::Pack,
+        instruction::{Instruction, AccountMeta,}, pubkey::Pubkey, program_pack::Pack,
         system_program,
         rent::Rent, sysvar::Sysvar, system_instruction::create_account,
     },
     crate::{
         error::Result, origin::Origin, error::RomeProgramError::*, non_evm::Bind,
     },
-    super::{Program, next, SplToken, System, spl_pda, len_eq},
-    std::{
-        convert::TryFrom,
-    },
+    super::{Program, next, SplToken, System, spl_pda, len_eq, get_account_mut},
+    std::convert::TryFrom,
     spl_associated_token_account::instruction::{
         create_associated_token_account,
     },
@@ -35,34 +33,38 @@ impl Create {
 
     pub fn emulate<T: Origin>(
         state: &T,
-        binds: Vec<Bind>
+        meta: &Vec<AccountMeta>,
+        binds: &mut Vec<Bind>
     ) -> Result<()> {
-        let iter = &mut binds.into_iter();
+        let iter = &mut meta.iter();
+
         let signer = next(iter)?;
         let new = next(iter)?;
-        let owner = next(iter)?.0;
+        let owner = next(iter)?;
         let mint = next(iter)?;
         let _ = next(iter)?;
-        let spl_program = next(iter)?.0;
+        let spl_program = next(iter)?;
 
-        let (key, _) = spl_pda(owner, mint.0, spl_program);
-
-        if key != *new.0 {
-            return Err(AccountsMismatch(*new.0, key))
+        let (key, _) = spl_pda(&owner, &mint, &spl_program);
+        if key != new {
+            return Err(AccountsMismatch(new, key))
         }
 
-        if new.1.owner != system_program::ID {
-            return Err(AccountAlreadyExists(*new.0))
+        {
+            let acc = get_account_mut(&new, binds)?;
+            if acc.owner != system_program::ID {
+                return Err(AccountAlreadyExists(new))
+            }
         }
 
         let len = spl_token::state::Account::LEN;
         let rent = Rent::get()?.minimum_balance(len);
 
-        let ix = create_account(signer.0, new.0, rent, len as u64, spl_program);
-        System::new(state).emulate(&ix, vec![signer, (new.0, new.1)])?;
+        let ix = create_account(&signer, &new, rent, len as u64, &spl_program);
+        System::new(state).emulate(&ix, binds)?;
 
-        let ix = initialize_account3(&spl_token::ID, new.0, mint.0, owner)?;
-        SplToken::new(state).emulate(&ix, vec![(new.0, new.1), mint])?;
+        let ix = initialize_account3(&spl_token::ID, &new, &mint, &owner)?;
+        SplToken::new(state).emulate(&ix, binds)?;
 
         Ok(())
     }

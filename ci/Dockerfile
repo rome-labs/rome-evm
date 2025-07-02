@@ -15,8 +15,8 @@ ENV PATH=${PATH}:/root/.local/share/solana/install/active_release/bin
 COPY rome-evm /opt/rome-evm
 
 WORKDIR /opt/rome-evm/program
-RUN cargo test --features ${FEATURE:-ci}
-RUN cargo build-sbf --features ${FEATURE:-ci}
+RUN cargo test --features ${FEATURE:-ci}, --no-default-features
+RUN cargo build-sbf --features ${FEATURE:-ci}, custom-heap --no-default-features
 
 FROM anzaxyz/agave:v2.1.7
 COPY --from=build /opt/rome-evm/target/deploy/rome_evm.so /opt/

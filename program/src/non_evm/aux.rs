@@ -1,9 +1,9 @@
 use {
-    crate::{error::{Result, RomeProgramError::*}, U256,},
+    crate::{error::{Result, RomeProgramError::*}, U256, state::aux::Account},
     solana_program::{
-        pubkey::Pubkey, program_error::ProgramError, msg,
+        pubkey::Pubkey, program_error::ProgramError, msg, instruction::AccountMeta,
     },
-    super:: Bind,
+    super::Bind,
     std::{
         convert::TryFrom,
     }
@@ -37,10 +37,20 @@ macro_rules! val_eq {
 pub use len_eq;
 pub use len_ge;
 
+pub fn get_account_mut<'a, 'b>(key: &Pubkey, binds: &'b mut Vec<Bind<'a>>) -> Result<&'b mut Account> {
+    let acc = binds
+        .iter_mut()
+        .find(|(key_, _)| **key_ == *key)
+        .map(|(_, acc)| acc)
+        .ok_or(InconsistentAccountList)?;
 
-pub fn next<'a, I: Iterator<Item = Bind<'a>>>(iter: &mut I) -> Result<I::Item> {
+    Ok(acc)
+}
+
+pub fn next<'a, I: Iterator<Item = &'a AccountMeta>>(iter: &mut I) -> Result<Pubkey> {
     iter
         .next()
+        .map(|x| x.pubkey)
         .ok_or(ProgramError::NotEnoughAccountKeys.into())
 }
 

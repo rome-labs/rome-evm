@@ -13,6 +13,9 @@ mod eth_get_tx_count;
 mod get_rollups;
 mod reg_owner;
 mod transmit_tx;
+mod alt_alloc;
+mod alt_dealloc;
+mod get_alt;
 
 pub use confirm_tx_iterative::confirm_tx_iterative;
 pub use deposit::deposit;
@@ -29,7 +32,11 @@ pub use eth_get_tx_count::eth_get_tx_count;
 pub use get_rollups::get_rollups;
 pub use reg_owner::reg_owner;
 use solana_program::entrypoint::MAX_PERMITTED_DATA_INCREASE;
+use solana_program::instruction::AccountMeta;
 pub use transmit_tx::transmit_tx;
+pub use alt_alloc::alt_alloc;
+pub use alt_dealloc::alt_dealloc;
+pub use get_alt::get_alt;
 
 use {
     crate::{
@@ -252,6 +259,17 @@ impl Emulation {
         let gas = actual_fee.saturating_sub(refund);
 
         Ok(21_000.max(gas))
+    }
+
+    pub fn get_account_metas(&self) -> Vec<AccountMeta> {
+        self.accounts
+            .iter()
+            .map(|(pubkey, item)| AccountMeta {
+                pubkey: *pubkey,
+                is_signer: false,
+                is_writable: item.account.writable,
+            })
+            .collect::<Vec<AccountMeta>>()
     }
 }
 

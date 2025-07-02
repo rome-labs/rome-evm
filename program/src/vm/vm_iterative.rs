@@ -2,14 +2,14 @@ use {
     super::{vm::Vm, Execute},
     crate::{
         accounts::Iterations,
-        config::{NUMBER_OPCODES_PER_TX, SIG_VERIFY_COST},
+        config::{NUMBER_OPCODES_PER_TX, SIG_VERIFY_COST, HASH},
         context::{AccountLock, Context},
         error::{Result, RomeProgramError::*},
         origin::Origin,
         state::Allocate,
     },
     evm::{Handler, U256,},
-    solana_program::msg,
+    solana_program::{msg,  log::sol_log_data}
 };
 
 pub enum MachineIt {
@@ -25,9 +25,11 @@ pub enum MachineIt {
     MergeSlots,
     AllocateStorage,
     Unlock,
+    UnlockFailedTx,
     NextIteration(Box<Self>),
     NextIterationUnchecked(Box<Self>),
-    Unnecessary,
+    Completed,
+    Failed,
     Commit,
     Exit,
 }
@@ -45,7 +47,9 @@ impl From<Iterations> for MachineIt {
             Iterations::AllocateStorage => AllocateStorage,
             Iterations::Commit => Commit,
             Iterations::Unlock => Unlock,
-            Iterations::Unnecessary => Unnecessary,
+            Iterations::UnlockFailedTx => UnlockFailedTx,
+            Iterations::Completed => Completed,
+            Iterations::Failed => Failed,
         }
     }
 }
@@ -60,7 +64,9 @@ impl From<&MachineIt> for Iterations {
             AllocateStorage => Iterations::AllocateStorage,
             Commit => Iterations::Commit,
             Unlock => Iterations::Unlock,
-            Unnecessary => Iterations::Unnecessary,
+            UnlockFailedTx => Iterations::UnlockFailedTx,
+            Completed => Iterations::Completed,
+            Failed => Iterations::Failed,
             _ => panic!("VmFault: MachineIterativeative to Iterations cast error"),
         }
     }
@@ -173,10 +179,10 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIt> for VmIt
 
                 let state =  if let Some((value, reason)) = self.vm.init(&mut tx, check_nonce, fee_addr)? {
                     self.vm.set_exit_reason(reason, value);
-                    if reason.is_succeed() {
+                    if reason.is_succeed() || reason.is_revert() {
                         Commit
                     } else {
-                        Unlock // skip Commit
+                        UnlockFailedTx // skip Commit
                     }
                 } else {
                     Execute
@@ -219,13 +225,16 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIt> for VmIt
                 msg!("IntoTrap");
                 let steps_left = NUMBER_OPCODES_PER_TX.saturating_sub(self.vm.steps_executed);
 
-                // TODO:  go to error if reason is not success
                 if let Some((return_value, reason)) = self.vm.execute(steps_left) {
                     self.vm.set_exit_reason(reason, return_value);
                     let next_step = if reason.is_succeed() {
                         Allocate
                     } else {
-                        Unlock // skip Commit
+                        if reason.is_revert() {
+                            Commit // skip Allocate
+                        } else {
+                            UnlockFailedTx // skip Commit
+                        }
                     };
                     Serialize(Box::new(next_step))
 
@@ -296,12 +305,30 @@ impl<T: Origin + Allocate, L: AccountLock + Context> Execute<MachineIt> for VmIt
             }
             Unlock => {
                 msg!("Unlock");
+                self.context.deserialize(&mut self.vm)?;
+                if self.context.locked()? {
+                    let hash = self.vm.handler.hash_journaled_accounts(&self.vm.handler.journal)?;
+                    sol_log_data(&[HASH,  hash.as_ref()]);
+                }
+
                 self.context.unlock()?;
-                NextIterationUnchecked(Box::new(Unnecessary))
+                NextIterationUnchecked(Box::new(Completed))
             }
-            Unnecessary => {
+            Completed => {
                 msg!("UnnecessaryIteration: {}", self.context.tx_hash());
                 return Err(UnnecessaryIteration(self.context.tx_hash()));
+            }
+            UnlockFailedTx => {
+                msg!("UnlockFailedTx");
+                self.context.deserialize(&mut self.vm)?;
+                msg!("reason: {:?}", self.vm.exit_reason.unwrap());
+
+                self.context.unlock()?;
+                NextIterationUnchecked(Box::new(Failed))
+            }
+            Failed => {
+                msg!("TxFailed: {}", self.context.tx_hash());
+                return Err(UnnecessaryIteration(self.context.tx_hash()))
             }
             NextIteration(to) => {
                 let fee = match *to {

@@ -6,7 +6,7 @@ use {
     borsh::{BorshDeserialize, BorshSerialize},
     evm::{H160, H256, U256},
     solana_program::msg,
-    std::collections::{BTreeMap, HashSet},
+    std::collections::{BTreeMap, HashSet, BTreeSet,},
 };
 
 #[allow(dead_code)]
@@ -416,5 +416,66 @@ impl Journal {
 
     pub fn merge_page(&mut self) {
         self.page = self.page.checked_sub(1).expect("fm vault");
+    }
+
+    pub fn journaled_accs(&self) -> BTreeSet<H160> {
+        let mut parent = self
+            .parent
+            .as_ref()
+            .map_or(BTreeSet::new(), |parent| parent.journaled_accs());
+
+        let mut local = self
+            .diff
+            .iter()
+            .filter(|(_, vec)| {
+                vec
+                    .iter()
+                    .any(|diff| {
+                        match diff {
+                            Diff::NonceChange
+                            | Diff::TransferFrom { balance: _ }
+                            | Diff::TransferTo{balance: _ }
+                            | Diff::CodeChange{ code: _, valids: _ } => true,
+                            _ => false,
+                        }
+                    })
+            })
+            .map(|(addr, _)| *addr)
+            .collect::<BTreeSet<_>>();
+
+        local.append(&mut parent);
+
+        local
+    }
+    pub fn journaled_slots(&self) -> BTreeMap<H160, BTreeSet<U256>> {
+        let mut slot_map = self
+            .parent
+            .as_ref()
+            .map_or(BTreeMap::new(), |parent| parent.journaled_slots());
+
+        self
+            .diff
+            .iter()
+            .for_each(|(addr, diffs)| {
+                let mut slots = diffs
+                    .iter()
+                    .filter_map(|diff|
+                        match diff {
+                            Diff::StorageChange { key, value: _ } => Some(*key),
+                            _ => None,
+                        }
+                    )
+                    .collect::<BTreeSet<_>>();
+                
+                // in case of selfdestruct the Diff contains address without diffs
+                if slots.len() > 0 {
+                    slot_map
+                        .entry(*addr)
+                        .and_modify(|set| set.append(&mut slots))
+                        .or_insert(slots);
+                }
+            });
+                
+        slot_map
     }
 }

@@ -1,6 +1,6 @@
 use {
     crate::{
-        accounts::{cast_slice, cast_slice_mut, slise_len, Data, Storage},
+        accounts::{cast_slice, cast_slice_mut, slice_len, Data, Storage},
         error::Result,
         STORAGE_LEN,
     },
@@ -30,7 +30,7 @@ impl Data for Slot {
         Storage::offset(info) + Storage::size(info)
     }
     fn size(info: &AccountInfo) -> usize {
-        let cnt = slise_len::<Self>(info);
+        let cnt = slice_len::<Self>(info);
         assert!(cnt <= STORAGE_LEN);
         cnt
     }

@@ -17,6 +17,9 @@ pub const NUMBER_ALLOC_DIFF_PER_TX: u64 = 10; // mut be <= 64  (max_instruction_
 pub const STORAGE_LEN: usize = 256; // must be <= u8::MAX+1
 pub const CONTRACT_SOL_WALLET: &[u8] = b"CONTRACT_SOL_WALLET";
 pub const RSOL_DECIMALS: usize = 18;
+pub const HASH: &[u8] = b"HASH"; // hash of the journaled accounts
+pub const ALT_SLOTS: &[u8] = b"ALT_SLOTS";
+pub const ALT_OUTDATED_SLOTS_TRACK :usize = 25; 
 
 #[cfg(feature = "ci")]
 pub mod registration_key {

@@ -89,11 +89,8 @@ impl<'a, T: Origin + Allocate> Vm<'a, T> {
         let valids = self.handler.valids(call.code_address);
         let runtime = evm::Runtime::new(code, valids, call.input, call.context);
 
-        self.handler.new_page();
-
         if self.snapshot.is_none() {
-            let from = self.handler.origin.unwrap();
-            self.handler.journal.get_mut(&from).push(Diff::NonceChange);
+            self.inc_origin_nonce();
         }
 
         if let Some(transfer) = call.transfer {
@@ -120,7 +117,6 @@ impl<'a, T: Origin + Allocate> Vm<'a, T> {
         let caller = create.context.caller;
         let runtime = evm::Runtime::new(create.init_code, valids, vec![], create.context);
 
-        self.handler.new_page();
         self.handler.journal.get_mut(&caller).push(Diff::NonceChange);
 
         if evm::CONFIG.create_increase_nonce {
@@ -297,6 +293,17 @@ impl<'a, T: Origin + Allocate> Vm<'a, T> {
         assert!(self.exit_reason.is_some());
         let exit_reason = self.exit_reason.unwrap();
 
+        #[cfg(target_os = "solana")]
+        let code = match exit_reason {
+            ExitReason::Succeed(_) => 0x0_u8,
+            ExitReason::Revert(_) => {
+                self.log_revert_msg()?;
+                0x2
+            },
+            _ => panic!("vm state machine fault"),
+        };
+
+        #[cfg(not(target_os = "solana"))]
         let code = match exit_reason {
             ExitReason::Succeed(_) => 0x0_u8,
             ExitReason::Error(_) => 0x1,
@@ -383,10 +390,12 @@ impl<'a, T: Origin + Allocate> Vm<'a, T> {
     pub fn trap(&mut self, trap: Trap) -> Option<(Vec<u8>, ExitReason)> {
         match trap {
             Trap::Call(call) => {
+                self.handler.new_page();
                 self.push_call_snapshot(call);
                 None
             }
             Trap::Create(create) => {
+                self.handler.new_page();
                 self.push_create_snapshot(create);
                 None
             }
@@ -394,9 +403,12 @@ impl<'a, T: Origin + Allocate> Vm<'a, T> {
                 let snapshot = self.pop_snapshot().expect("vm fault");
                 let exit = self.commit_exit(snapshot, reason);
 
-                if let Some((_, reason)) = exit.as_ref() {
-                    if !reason.is_succeed() {
+                if let Some((_, reason_)) = exit.as_ref() {
+                    if !reason_.is_succeed() {
                         self.handler.revert_all();  // fatal error or there is no parent snapshot
+                    }
+                    if reason.is_revert() {
+                        self.inc_origin_nonce();
                     }
                     return exit
                 }
@@ -410,15 +422,19 @@ impl<'a, T: Origin + Allocate> Vm<'a, T> {
                 exit
             }
             Trap::ExitNoShapshot(value, reason) => {
-                if reason.is_succeed() { 
-                    let from = self.handler.origin.unwrap();
-                    self.handler.journal.get_mut(&from).push(Diff::NonceChange);
+                if reason.is_succeed() || reason.is_revert() {  // revert is never reached from non-evm programs
+                    self.inc_origin_nonce();
                 }
                 // no need to revert diff, it was done in handler.call()
                 
                 Some((value, reason))
             }
         }
+    }
+
+    pub fn inc_origin_nonce(&mut self) {
+        let from = self.handler.origin.unwrap();
+        self.handler.journal.get_mut(&from).push(Diff::NonceChange);
     }
 
     pub fn execute(&mut self, steps: u64) -> Option<(Vec<u8>, ExitReason)> {

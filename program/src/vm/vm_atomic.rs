@@ -5,11 +5,12 @@ use {
         error::Result,
         origin::Origin,
         state::Allocate,
-        config::SIG_VERIFY_COST,
+        config::{SIG_VERIFY_COST, HASH},
         H160,
         tx::tx::Tx,
+        Journal,
     },
-    solana_program::msg,
+    solana_program::{msg, log::sol_log_data,},
 };
 
 pub enum MachineAt {
@@ -18,6 +19,7 @@ pub enum MachineAt {
     Execute,
     Commit,
     GasTransfer,
+    Hash(Journal),
     Exit,
 }
 
@@ -62,7 +64,7 @@ impl<T: Origin + Allocate, L: AccountLock> Execute<MachineAt> for VmAt<'_, T, L>
                 msg!("Init");
                 if let Some((value, reason)) = self.vm.init(&mut self.tx, true, self.fee_addr)? {
                     self.vm.set_exit_reason(reason, value);
-                    if reason.is_succeed() {
+                    if reason.is_succeed() || reason.is_revert() {
                         Commit
                     } else {
                         Exit
@@ -75,7 +77,7 @@ impl<T: Origin + Allocate, L: AccountLock> Execute<MachineAt> for VmAt<'_, T, L>
                 msg!("Execute");
                 if let Some((return_value, reason)) = self.vm.execute(u64::MAX) {
                     self.vm.set_exit_reason(reason, return_value);
-                    if reason.is_succeed() {
+                    if reason.is_succeed() || reason.is_revert() {
                         Commit 
                     } else {
                         Exit
@@ -88,11 +90,12 @@ impl<T: Origin + Allocate, L: AccountLock> Execute<MachineAt> for VmAt<'_, T, L>
                 msg!("Commit");
                 self.vm.handler.alloc_slots_unchecked()?;
                 self.vm.handler.commit(self.context)?;
-                self.vm.handler.revert_all();
                 self.vm.log_exit_reason()?;
                 GasTransfer
             }
             GasTransfer => {
+                let journal = self.vm.handler.get_and_revert_all();
+                
                 // TODO: create test for gas payment in case of Revert
                 self.vm.handler.state.base().add_fee(SIG_VERIFY_COST)?;
                 let (fee, refund) = self.vm.handler.state.base().get_fees();
@@ -101,6 +104,11 @@ impl<T: Origin + Allocate, L: AccountLock> Execute<MachineAt> for VmAt<'_, T, L>
                 // TODO: remove this len from alloc_payed, remove this cost from lamports_fee 
                 self.vm.gas_transfer(fee, refund)?;
                 self.vm.handler.commit(self.context)?;
+                Hash(journal)
+            }
+            Hash(journal) => {
+                let hash = self.vm.handler.hash_journaled_accounts(&journal)?;
+                sol_log_data(&[HASH,  hash.as_ref()]);
                 Exit
             }
             Exit => {

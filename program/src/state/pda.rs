@@ -1,8 +1,8 @@
 use {
     crate::{
-        error::Result, state::base::Syscall, AccountState, AccountType, Data,
+        error::Result, state::base::Syscall, AccountState, AccountType, Data, AltId,
         OwnerInfo, RoLock, StateHolder, Storage, TxHolder, ACCOUNT_SEED, OWNER_INFO, RO_LOCK_SEED,
-        STATE_HOLDER_SEED, STORAGE_LEN, TX_HOLDER_SEED, CONTRACT_SOL_WALLET,
+        STATE_HOLDER_SEED, STORAGE_LEN, TX_HOLDER_SEED, CONTRACT_SOL_WALLET, ALT_SLOTS,
     },
     borsh::{BorshDeserialize, BorshSerialize},
     evm::{H160, U256},
@@ -102,24 +102,20 @@ impl<'a> Pda<'a> {
         (key, seed)
     }
     pub fn tx_holder_key(&self, base: &Pubkey, index: u64) -> (Pubkey, Seed) {
-        let mut seed = Seed {
-            items: vec![
-                self.chain.clone(),
-                TX_HOLDER_SEED.to_vec(),
-                base.as_ref().to_vec(),
-                index.to_le_bytes().to_vec(),
-            ],
-        };
-        let (key, bump_seed) = self.find_pda(&seed);
-        seed.add(bump_seed);
-        (key, seed)
+        self.holder_key(base, index, TX_HOLDER_SEED)
     }
 
     pub fn state_holder_key(&self, base: &Pubkey, index: u64) -> (Pubkey, Seed) {
+        self.holder_key(base, index, STATE_HOLDER_SEED)
+    }
+    pub fn alt_slots_key(&self, base: &Pubkey, index: u64) -> (Pubkey, Seed) {
+        self.holder_key(base, index, ALT_SLOTS)
+    }
+    fn holder_key(&self, base: &Pubkey, index: u64, salt: &[u8]) -> (Pubkey, Seed) {
         let mut seed = Seed {
             items: vec![
                 self.chain.clone(),
-                STATE_HOLDER_SEED.to_vec(),
+                salt.to_vec(),
                 base.as_ref().to_vec(),
                 index.to_le_bytes().to_vec(),
             ],
@@ -205,6 +201,7 @@ impl<'a> Pda<'a> {
             AccountType::StateHolder => StateHolder::init(info),
             AccountType::RoLock => RoLock::init(info),
             AccountType::OwnerInfo => OwnerInfo::init(info),
+            AccountType::AltSlots => AltId::init(info),
         }
     }
     pub fn empty_size(info: &AccountInfo, typ: &AccountType) -> usize {
@@ -216,6 +213,7 @@ impl<'a> Pda<'a> {
             AccountType::StateHolder => StateHolder::offset(info) + StateHolder::size(info),
             AccountType::RoLock => RoLock::offset(info),
             AccountType::OwnerInfo => OwnerInfo::offset(info),
+            AccountType::AltSlots => AltId::offset(info) + AltId::size(info),
         }
     }
     pub fn serialize(&self, into: &mut &mut [u8]) -> Result<()> {

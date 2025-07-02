@@ -16,7 +16,7 @@ pub use accounts::*;
 use api::*;
 pub use assert::*;
 pub use config::*;
-pub use evm::{ExitReason, Valids as EvmValids, H160, H256, U256};
+pub use evm::{ExitReason, Valids as EvmValids, H160, H256, U256, Context};
 pub use state::*;
 
 entrypoint! {
@@ -27,4 +27,6 @@ entrypoint! {
     DoTxIterative => do_tx_iterative,
     DoTxHolderIterative => do_tx_holder_iterative,
     RegOwner => reg_owner,
+    AltAlloc => alt_alloc,
+    AltDelloc => alt_dealloc,
 }

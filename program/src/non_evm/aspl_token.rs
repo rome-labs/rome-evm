@@ -3,7 +3,8 @@ use {
         instruction::Instruction, pubkey::Pubkey,
     },
     crate::{
-        H160, pda::Seed, error::Result, origin::Origin, non_evm::Bind, error::RomeProgramError::*,
+        H160, pda::Seed, error::Result, origin::Origin, non_evm::{Bind, NonEvmState},
+        error::RomeProgramError::*,
     },
     borsh::{BorshDeserialize,},
     super::{
@@ -14,10 +15,6 @@ use {
         AssociatedTokenAccountInstruction as ATAI,
     },
     evm::Context,
-};
-#[cfg(feature = "single-state")]
-use {
-    crate::non_evm::NonEvmState,
 };
 
 //  0x89a569f4      create_associated_token_account(bytes32,bytes32)
@@ -45,13 +42,16 @@ impl<'a, T: Origin> ASplToken<'a, T> {
 }
 
 impl<'a, T: Origin> Program for ASplToken<'a, T> {
-    fn emulate(&self, ix: &Instruction, binds: Vec<Bind>) -> Result<()>  {
+    fn emulate(&self, ix: &Instruction, binds: &mut Vec<Bind>) -> Result<()>  {
         match ATAI::try_from_slice(&ix.data)? {
-            ATAI::Create => Create::emulate(self.state, binds),
-            _ => unimplemented!(),
+            ATAI::Create => Create::emulate(self.state, &ix.accounts, binds),
+            _ => Err(Unimplemented("instruction is not supported by ASplProgram".to_string())),
         }
     }
-
+    fn eth_call(&self, args: &[u8], _: &NonEvmState) -> Result<Vec<u8>> {
+        let (func, _) = args.split_at(4);
+        Err(Unimplemented(format!("eth_call is not supported by ASplProgram: {}", hex::encode(func))))
+    }
     fn ix_from_abi(&self, input: &[u8], _: &Context) -> Result<(Instruction, Seed, Vec<EvmDiff>)> {
         let (func, rest) = input.split_at(4);
 
@@ -71,8 +71,14 @@ impl<'a, T: Origin> Program for ASplToken<'a, T> {
                 
                 Ok((ix, Seed::default(), vec![]))
             },
-            _ => unimplemented!()
+            _ => Err(Unimplemented(format!("method is not supported by ASplProgram {}", hex::encode(func))))
         }
+    }
+    fn found_eth_call(&self, _: &[u8]) -> bool {
+        false
+    }
+    fn transfer_allowed(&self) -> bool {
+        false
     }
 
     #[cfg(feature = "single-state")]

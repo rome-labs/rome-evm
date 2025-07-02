@@ -1,5 +1,6 @@
 use {
     solana_program::{
+        instruction::AccountMeta,
         system_instruction::{
             create_account, allocate, assign, transfer,
         },
@@ -10,7 +11,7 @@ use {
         error::{Result, RomeProgramError::*,}, U256, origin::Origin,
         H160, pda::Seed,
     },
-    super::{next, Bind, len_eq,},
+    super::{next, Bind, len_eq, get_account_mut},
     std::{
         convert::TryFrom,
     },
@@ -42,24 +43,27 @@ impl CreateA {
         Ok((ix, seed))
     }
 
-    pub fn emulate(lamports: u64, len: u64, owner: &Pubkey, binds: Vec<Bind>) -> Result<()> {
-        let iter  = &mut binds.into_iter();
+    pub fn emulate(meta: &Vec<AccountMeta>, lamports: u64, len: u64, owner: &Pubkey, binds: &mut Vec<Bind>) -> Result<()> {
+        let iter  = &mut meta.iter();
+        let signer = next(iter)?;
+        let new = next(iter)?;
 
-        let (&signer_key, signer) = next(iter)?;
-        let (&new_key, new) = next(iter)?;
-
-        signer.lamports = signer
-            .lamports
-            .checked_sub(lamports)
-            .ok_or(InsufficientLamports(signer_key, lamports))?;
-
-        if !(new.lamports == 0 && new.data.is_empty() && system_program::ID == new.owner) {
-            return Err(AccountAlreadyExists(new_key))
+        {
+            let signer_ = get_account_mut(&signer, binds)?;
+            signer_.lamports = signer_
+                .lamports
+                .checked_sub(lamports)
+                .ok_or(InsufficientLamports(signer, lamports))?;
         }
 
-        new.lamports = lamports;
-        new.data.resize(len as usize, 0);
-        new.owner = *owner;
+        let new_ = get_account_mut(&new, binds)?;
+        if !(new_.lamports == 0 && new_.data.is_empty() && system_program::ID == new_.owner) {
+            return Err(AccountAlreadyExists(new))
+        }
+
+        new_.lamports = lamports;
+        new_.data.resize(len as usize, 0);
+        new_.owner = *owner;
 
         Ok(())
     }
@@ -77,12 +81,13 @@ impl Allocate {
         Ok(ix)
     }
 
-    pub fn emulate(len: u64, binds: Vec<Bind>) -> Result<()> {
-        let iter  = &mut binds.into_iter();
-        let (key, acc) = next(iter)?;
+    pub fn emulate(meta: &Vec<AccountMeta>, len: u64, binds: &mut Vec<Bind>) -> Result<()> {
+        let iter  = &mut meta.iter();
+        let key = next(iter)?;
+        let acc = get_account_mut(&key, binds)?;
 
         if !acc.data.is_empty() || system_program::ID != acc.owner {
-            return Err(AccountAlreadyInUse(*key))
+            return Err(AccountAlreadyInUse(key))
         }
 
         acc.data.resize(len as usize, 0);
@@ -116,30 +121,28 @@ impl Transfer {
 
         Ok((ix, seed))
     }
-    pub fn emulate(ix: &Instruction, lamports: u64, binds: Vec<Bind>) -> Result<()> {
-        let auth = ix.accounts.get(0).unwrap().pubkey;
-        let to = ix.accounts.get(1).unwrap().pubkey;
-
-        if auth == to {
+    pub fn emulate(meta: &Vec<AccountMeta>, lamports: u64, binds: &mut Vec<Bind>) -> Result<()> {
+        let iter  = &mut meta.iter();
+        let from = next(iter)?;
+        let to = next(iter)?;
+        
+        if from == to {
             return Ok(())
         }
 
-        let iter  = &mut binds.into_iter();
-        let from = next(iter)?;
-        let to = next(iter)?;
-
-        if !from.1.data.is_empty() {
-            return Err(TransferFromAccountWithData(*from.0))
+        {
+            let from_ = get_account_mut(&from, binds)?;
+            if !from_.data.is_empty() {
+                return Err(TransferFromAccountWithData(from))
+            }
+            from_.lamports = from_
+                .lamports
+                .checked_sub(lamports)
+                .ok_or(InsufficientLamports(from, lamports))?;
         }
 
-        from.1.lamports = from
-            .1
-            .lamports
-            .checked_sub(lamports)
-            .ok_or(InsufficientLamports(*from.0, lamports))?;
-
-        to.1.lamports = to
-            .1
+        let to_ = get_account_mut(&to, binds)?;
+        to_.lamports = to_
             .lamports
             .checked_add(lamports)
             .ok_or(CalculationOverflow)?;
@@ -160,17 +163,18 @@ impl Assign {
         Ok(assign(&acc, &owner))
     }
 
-    pub fn emulate(owner: &Pubkey, binds: Vec<Bind>) -> Result<()> {
-        let iter  = &mut binds.into_iter();
-        let (key, acc) = next(iter)?;
+    pub fn emulate(meta: &Vec<AccountMeta>, owner: &Pubkey, binds: &mut Vec<Bind>) -> Result<()> {
+        let iter  = &mut meta.iter();
+        let key = next(iter)?;
+        let acc = get_account_mut(&key, binds)?;
 
         if system_program::ID != acc.owner {
-            return Err(AccountAlreadyInUse(*key))
+            return Err(AccountAlreadyInUse(key))
         }
 
         #[cfg(not(target_os = "solana"))]
         if !is_zeroed(&acc.data) {
-            return Err(AccountAlreadyInUse(*key))
+            return Err(AccountAlreadyInUse(key))
         }
 
         acc.owner = *owner;

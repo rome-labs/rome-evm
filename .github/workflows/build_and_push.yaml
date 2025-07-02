@@ -1,4 +1,4 @@
-name: Build
+name: Build with feature and push (no tests)
 run-name: "Build and push (no tests)"
 
 on:
@@ -29,7 +29,7 @@ permissions:
 jobs:
   build:
     runs-on:
-      labels: ubuntu-22.04-2core-8gb-75
+      labels: ubuntu-22.04-8core-32gb-300
     steps:
       - name: 'Checkout rome-evm repository'
         uses: actions/checkout@v4

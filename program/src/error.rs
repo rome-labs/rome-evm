@@ -3,6 +3,7 @@ use {
     evm::{H160, H256, U256},
     rlp::DecoderError,
     solana_program::{
+        instruction::InstructionError,
         program_error::ProgramError,
         pubkey::{ParsePubkeyError, Pubkey, PubkeyError},
     },
@@ -169,9 +170,6 @@ pub enum RomeProgramError {
     #[error("Attempt to modity read-only account: {0}")]
     ModifyReadOnlyAccount(Pubkey),
 
-    #[error("Invalid non-evm authority account: {0}")]
-    InvalidAuthority(Pubkey),
-
     #[error("Inconsistent account list")]
     InconsistentAccountList,
 
@@ -192,6 +190,15 @@ pub enum RomeProgramError {
 
     #[error("Gas_price is less than the minimum value 10^9")]
     InvalidGasPrice,
+
+    #[error("An solana instruction error: {0}")]
+    InstructionError(#[from] InstructionError),
+    
+    #[error("Invalid ALT instruction data, recent_slot already used: {0}")]
+    AltSlotAlreadyInUse(u64),
+    
+    #[error("Too many accounts: {0}")]
+    TooManyAccounts(u64)
 }
 
 impl From<ProgramError> for RomeProgramError {

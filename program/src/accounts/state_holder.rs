@@ -4,7 +4,7 @@ use {
     },
     crate::error::Result,
     evm::H256,
-    solana_program::account_info::AccountInfo,
+    solana_program::{account_info::AccountInfo, msg},
     std::{
         cell::{Ref, RefMut},
         mem::size_of,
@@ -23,17 +23,24 @@ pub enum Iterations {
     AllocateStorage = 7,
     Commit = 8,
     Unlock = 9,
-    Unnecessary = 10, // UnnecessaryIteration
+    UnlockFailedTx = 10,
+    Completed = 11, 
+    Failed = 12, 
 }
 
 impl Iterations {
     pub fn is_complete(&self) -> bool {
-        if !matches!(self, Iterations::Unlock | Iterations::Unnecessary) {
-            solana_program::msg!("not enough iterations, last iteration: {:?}", self);
-            return false;
+        match self {
+            Iterations::Unlock | Iterations::Completed => true,
+            Iterations::UnlockFailedTx | Iterations::Failed => {
+                msg!("transaction failed, last iteration: {:?}", self);
+                false
+            },
+            _ => {
+                msg!("not enough iterations, last iteration: {:?}", self);
+                false
+            }
         }
-
-        true
     }
 }
 #[repr(C, packed)]

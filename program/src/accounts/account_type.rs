@@ -18,6 +18,7 @@ pub enum AccountType {
     StateHolder = 4,
     RoLock = 5,
     OwnerInfo = 6,
+    AltSlots = 7,
 }
 
 impl AccountType {

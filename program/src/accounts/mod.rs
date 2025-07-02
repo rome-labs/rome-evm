@@ -11,6 +11,8 @@ mod storage;
 mod tx_holder;
 mod valids;
 mod ver;
+mod alt_id;
+mod alt_slots;
 
 pub use account_state::*;
 pub use account_type::*;
@@ -25,6 +27,8 @@ pub use storage::Storage;
 pub use tx_holder::TxHolder;
 pub use valids::Valids;
 pub use ver::Ver;
+pub use alt_id::AltId;
+pub use alt_slots::AltSlots;
 
 use {
     crate::error::{Result, RomeProgramError::InvalidDataLength},
@@ -131,7 +135,7 @@ fn cast_slice_mut<'a, T>(
     Ok(slice)
 }
 
-fn slise_len<T: Data>(info: &AccountInfo) -> usize {
+fn slice_len<T: Data>(info: &AccountInfo) -> usize {
     let offset = T::offset(info);
     let mut len = info.data.borrow().len();
     assert!(len >= offset);

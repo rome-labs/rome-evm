@@ -4,13 +4,16 @@ use {
         origin::Origin,
         precompile::{ non_evm_program,},
         state::{Allocate, Diff},
-        non_evm::Program, aux::revert_msg,
+        non_evm::Program,
     },
     evm::{
         Capture, Context, CreateScheme, ExitError, ExitReason, Handler, Machine, Opcode, Stack,
-        Transfer, H160, H256, U256, ExitSucceed::Returned, ExitRevert::Reverted,
+        Transfer, H160, H256, U256, ExitSucceed::Returned,
+        ExitFatal::{self, TransferProhibited, NonEvmCallError, NonEvmStaticModeViolation,
+                    DelegateCallProhibited
+        },
     },
-    solana_program::{keccak::hash, },
+    solana_program::{keccak::hash, msg,},
     std::convert::Infallible,
 };
 
@@ -220,7 +223,7 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
         let new_addr = self.build_address(scheme);
 
         if new_addr.is_err() {
-            let res = (ExitReason::Revert(Reverted), None,  revert_msg("CreateCollision".to_string()));
+            let res = (ExitReason::Error(ExitError::CreateCollision), None,  vec![]);
             return Capture::Exit(res);
         }
         let new_addr = new_addr.unwrap();
@@ -307,8 +310,8 @@ impl<T: Origin + Allocate> Handler for JournaledState<'_, T> {
     }
 
     /// Handle other unknown external opcodes.
-    fn other(&mut self, opcode: Opcode, _stack: &mut Machine) -> Result<(), ExitError> {
-        Err(ExitError::IncompatibleVersionEVM(opcode.0))
+    fn other(&mut self, opcode: Opcode, _stack: &mut Machine) -> Result<(), ExitFatal> {
+        Err(ExitFatal::IncompatibleVersionEVM(opcode.0))
     }
 
     fn transient_storage(&self, address: H160, index: U256) -> U256 {
@@ -353,12 +356,26 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
         self.new_page();
 
         let (reason, val) = if program.found_eth_call(&input) {
+            // precompiled contract doesn't have special method "receive() external payable {}"
+            // => it should not be possible to send funds to such contracts.
+            // TODO: check this assumption
+            if let Some(transfer) = transfer {
+                if !transfer.value.is_zero() {
+                    // TODO: replace by revert for single_state
+                    msg!("TransferProhibited");
+                    return (ExitReason::Fatal(TransferProhibited), vec![])
+                }
+            }
+
             // TODO: no need to clone the non_evm_state for eth_call
             let non_evm_state = self.journal.non_evm_state();
 
             match program.eth_call(input, non_evm_state) {
                 Ok(val) => (ExitReason::Succeed(Returned), val),
-                Err(e) => (ExitReason::Revert(Reverted), revert_msg(e.to_string()))
+                Err(e) => {
+                    msg!("non-evm call error: {}", e.to_string());
+                    (ExitReason::Fatal(NonEvmCallError), vec![])
+                }
             }
         } else {
             self.non_evm_tx(code_address, transfer, input, static_call, context, program)
@@ -385,34 +402,46 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
     ) -> (ExitReason, Vec<u8>) {
 
         if is_static {
-            return (Reverted.into(), revert_msg("StaticModeViolation".to_string()))
+            msg!("StaticModeViolation");
+            return (ExitReason::Fatal(NonEvmStaticModeViolation), vec![])
         }
 
         if context.address != *code_address {
-            return (Reverted.into(), revert_msg("DelegateCallProhibited".to_string()))
+            msg!("DelegateCallProhibited");
+            return (ExitReason::Fatal(DelegateCallProhibited), vec![])
         }
 
         if let Some(transfer) = transfer {
             if !transfer.value.is_zero() && !program.transfer_allowed() {
-                return (Reverted.into(), revert_msg("TransferProhibited".to_string()))
+                msg!("TransferProhibited");
+                return (ExitReason::Fatal(TransferProhibited), vec![])
             }
         }
 
         let (ix, seed, evm_diff) = match program.ix_from_abi(input, context) {
             Ok(x) => x,
-            Err(e) => return (Reverted.into(), revert_msg(e.to_string()))
+            Err(e) => {
+                msg!("error to parse non-evm tx: {}", e.to_string());
+                return (ExitReason::Fatal(NonEvmCallError), vec![])
+            }
         };
 
         let non_evm_state = self.journal.non_evm_state();
 
-        let binds = match non_evm_state.ix_accounts_mut(self.state, &ix) {
+        let mut binds = match non_evm_state.ix_accounts_mut(self.state, &ix) {
             Ok(binds) => binds,
-            Err(e) => return (Reverted.into(), revert_msg(e.to_string()))
+            Err(e) => {
+                msg!("non-evm tx error: {}", e.to_string());
+                return (ExitReason::Fatal(NonEvmCallError), vec![])
+            }
         };
 
-        match program.emulate(&ix, binds) {
+        match program.emulate(&ix, &mut binds) {
             Ok(x) => x,
-            Err(e) => return (Reverted.into(), revert_msg(e.to_string()))
+            Err(e) => {
+                msg!("error to emulate non-evm tx: {}", e.to_string());
+                return (ExitReason::Fatal(NonEvmCallError), vec![])
+            }
         };
 
         for (addr, diff) in evm_diff {

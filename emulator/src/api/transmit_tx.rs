@@ -3,7 +3,7 @@ use {
     crate::state::State,
     rome_evm::{api::transmit_tx::args, error::Result, Data, Holder, TxHolder},
     solana_client::rpc_client::RpcClient,
-    solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey, system_program},
+    solana_program::{account_info::IntoAccountInfo, msg, pubkey::Pubkey,},
     std::sync::Arc,
 };
 
@@ -18,7 +18,6 @@ pub fn transmit_tx<'a>(
     let (holder, from, ix_hash, chain, tx) = args(data)?;
     let state = State::new(program_id, Some(*signer), client, chain)?;
 
-    let _sys_acc = state.info_sys(&system_program::ID)?;
     // TODO: the client side should implement the holder filling with taking into account holder header allocation
     let len = from + tx.len();
 

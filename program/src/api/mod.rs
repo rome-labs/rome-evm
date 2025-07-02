@@ -5,6 +5,8 @@ pub mod do_tx_holder_iterative;
 pub mod do_tx_iterative;
 pub mod reg_owner;
 pub mod transmit_tx;
+pub mod alt_alloc;
+pub mod alt_dealloc;
 
 pub use deposit::deposit;
 pub use do_tx::do_tx;
@@ -13,6 +15,8 @@ pub use do_tx_holder_iterative::do_tx_holder_iterative;
 pub use do_tx_iterative::do_tx_iterative;
 pub use reg_owner::reg_owner;
 pub use transmit_tx::transmit_tx;
+pub use alt_alloc::alt_alloc;
+pub use alt_dealloc::alt_dealloc;
 
 use {
     crate::{

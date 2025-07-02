@@ -1,5 +1,5 @@
 use {
-    super::{cast_slice, cast_slice_mut, slise_len, AccountType, Data, Ver},
+    super::{cast_slice, cast_slice_mut, slice_len, AccountType, Data, Ver},
     crate::error::Result,
     solana_program::{account_info::AccountInfo, pubkey::Pubkey},
     std::cell::{Ref, RefMut},
@@ -31,6 +31,7 @@ impl RoLock {
 
         Ok(found)
     }
+    
     pub fn remove(info: &AccountInfo, holder: &Pubkey) -> Result<bool> {
         let mut ro_lock = RoLock::from_account_mut(info)?;
 
@@ -79,6 +80,6 @@ impl Data for RoLock {
         Ver::offset(info) + Ver::size(info)
     }
     fn size(info: &AccountInfo) -> usize {
-        slise_len::<Self>(info)
+        slice_len::<Self>(info)
     }
 }

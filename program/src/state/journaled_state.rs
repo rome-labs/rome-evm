@@ -8,11 +8,11 @@ use {
     evm::{Handler, H160, H256, U256},
     solana_program::{
         clock::Clock,
-        keccak::{hash, hashv},
+        keccak::{hash, hashv, Hash},
         pubkey::Pubkey,
         sysvar::Sysvar,
     },
-    std::collections::{BTreeMap, HashMap, HashSet},
+    std::collections::{BTreeMap, BTreeSet, HashMap, HashSet,},
 };
 
 /// JournalState is internal EVM state that is used to contain state and track changes to that state.
@@ -82,6 +82,11 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
         self.journal = Journal::new()
     }
 
+    pub fn get_and_revert_all(&mut self) -> Journal {
+        let mut journal = Journal::new();
+        std::mem::swap(&mut self.journal, &mut journal);
+        journal
+    }
     pub fn set_code(&mut self, address: H160, code: Vec<u8>) {
         let valids = evm::Valids::compute(&code);
         let diff = Diff::CodeChange { code, valids };
@@ -235,5 +240,76 @@ impl<'a, T: Origin + Allocate> JournaledState<'a, T> {
         }
 
         Ok(keys_new_slots)
+    }
+
+    pub fn hash_journaled_accounts(&self, journal: &Journal) -> Result<Hash> {
+        let mut accs = journal.journaled_accs();
+        let mut slots = journal.journaled_slots();
+
+        // this journal doesn't include the gas_transfer
+        if let Some(fee_recipient) = self.gas_recipient {
+            accs.insert(fee_recipient);
+        }
+
+        accs
+            .iter()
+            .for_each(|addr| {
+                if slots.get(addr).is_none() {
+                    slots.insert(*addr, BTreeSet::new());
+                }
+        });
+
+        let mut hashes = vec![];
+
+        for (addr, slots_) in slots.iter() {
+            let nonce = self.state.nonce(addr)?.to_le_bytes();
+
+            let balance = self.state.balance(addr)?;
+            let mut balance_be = [0; 32];
+            balance.to_big_endian(&mut balance_be);
+
+            let code = self.state.code(addr)?;
+            
+            let values_be = self.slots_to_values_be(addr, &slots_)?;
+            let mut values_be_ref = values_be
+                .iter()
+                .map(|x| x.as_slice())
+                .collect::<Vec<_>>();
+
+            let mut slices = vec![
+                &addr[..],
+                nonce.as_slice(),
+                balance_be.as_slice(),
+                code.as_slice()
+            ];
+            
+            slices.append(&mut values_be_ref);
+            hashes.push(hashv(&slices));
+        }
+
+        let hash_vec = hashes.iter().map(|x| x.as_ref()).collect::<Vec<_>>();
+        
+        Ok(hashv(&hash_vec))
+    }
+
+    fn slots_to_values_be(&self, addr: &H160, slots: &BTreeSet<U256>) -> Result<Vec<[u8; 32]>> {
+        let values = slots
+            .iter()
+            .map(|slot| self.state.storage(addr, slot))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .map(|opt| opt.expect("storage slot expected"))
+            .collect::<Vec<_>>();
+        
+        let values_be = values
+            .iter()
+            .map(|item| {
+                let mut buf = [0_u8; 32];
+                item.to_big_endian(&mut buf);
+                buf
+            }).
+            collect::<Vec<_>>();
+        
+        Ok(values_be)
     }
 }

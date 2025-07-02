@@ -1,4 +1,3 @@
-use std::cmp::Ordering::{Greater, Less};
 use {
     super::fake,
     crate::stubs::Stubs,
@@ -14,7 +13,8 @@ use {
         account_info::IntoAccountInfo, msg, pubkey::Pubkey, rent::Rent, system_program,
         sysvar::Sysvar, program_stubs::set_syscall_stubs, system_instruction,
     },
-    std::{cell::RefCell, collections::BTreeMap, ops::Deref, sync::Arc},
+    std::{
+        cell::RefCell, collections::BTreeMap, ops::Deref, sync::Arc, cmp::Ordering::{Greater, Less}},
 };
 
 #[derive(Clone, Debug)]
@@ -48,6 +48,10 @@ impl<'a> State<'a> {
         chain: u64,
     ) -> Result<Self> {
         let state = Self::new_unchecked(program_id, signer, client, chain)?;
+        // 1. needs for transmit_tx,  
+        // 2. reduces the number of failures if tx depends on timestamp
+        let _ = state.info_sys(&system_program::ID)?; 
+            
         let mut bind = state.info_owner_reg(false)?;
         let info = bind.into_account_info();
         OwnerInfo::check_chain(&info, chain)?;
@@ -123,6 +127,11 @@ impl<'a> State<'a> {
     pub fn info_owner_reg(&self, or_create: bool) -> Result<Bind> {
         let (key, _) = self.pda.owner_info_key();
         self.info_pda(&key, OwnerInfo, None, or_create)
+    }
+    pub fn info_alt_slots(&self, index: u64, or_create: bool) -> Result<Bind> {
+        let signer = self.signer.expect("signer expected");
+        let (key, _) = self.pda.alt_slots_key(&signer, index);
+        self.info_pda(&key, AltSlots, None, or_create)
     }
     // TODO: the missing account must be included in the transaction accounts
     pub fn info_pda(

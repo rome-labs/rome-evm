@@ -47,17 +47,22 @@ impl<'a, T: Origin> System<'a, T> {
 }
 
 impl<'a, T: Origin> Program for System<'a, T> {
-    fn emulate(&self, ix: &Instruction, binds: Vec<Bind>) -> Result<()>  {
+    fn emulate(&self, ix: &Instruction, binds: &mut Vec<Bind>) -> Result<()>  {
 
         match limited_deserialize(&ix.data, u64::MAX).map_err(|_| InvalidNonEvmInstructionData)? {
 
             CreateAccount{lamports, space, owner} =>
-                CreateA::emulate(lamports, space, &owner, binds ),
-            Allocate {space} => Allocate_::emulate(space, binds),
-            Assign {owner} => Assign_::emulate(&owner, binds),
-            Transfer {lamports} => Transfer_::emulate(ix, lamports, binds),
-            _ => unimplemented!()
+                CreateA::emulate(&ix.accounts, lamports, space, &owner, binds ),
+            Allocate {space} => Allocate_::emulate(&ix.accounts, space, binds),
+            Assign {owner} => Assign_::emulate(&ix.accounts, &owner, binds),
+            Transfer {lamports} => Transfer_::emulate(&ix.accounts, lamports, binds),
+            _ => Err(Unimplemented("instruction is not supported by SystemProgram".to_string())),
+            
         }
+    }
+    fn eth_call(&self, args: &[u8], _: &NonEvmState) -> Result<Vec<u8>> {
+        let (func, _) = args.split_at(4);
+        Err(Unimplemented(format!("eth_call is not supported by SystemProgram: {}", hex::encode(func))))
     }
 
     fn ix_from_abi(&self, abi: &[u8], context: &Context) ->Result<(Instruction, Seed, Vec<EvmDiff>)> {
@@ -79,9 +84,16 @@ impl<'a, T: Origin> Program for System<'a, T> {
                 let (ix, seed) = Transfer_::new_from_abi(self.state, &context.caller, rest)?;
                 Ok((ix, seed, vec![]))
             },
-            _ => unimplemented!()
+            _ => Err(Unimplemented(format!("method is not supported by SystemProgram {}", hex::encode(func))))
         }
     }
+    fn found_eth_call(&self, _: &[u8]) -> bool {
+        false
+    }
+    fn transfer_allowed(&self) -> bool {
+        false
+    }
+
     #[cfg(feature = "single-state")]
     fn eth_call(&self, input: &[u8], state: &NonEvmState) -> Result<Vec<u8>> {
         self.eth_call_(input, state)
@@ -145,4 +157,5 @@ mod single_state_mod {
 }
 #[cfg(feature = "single-state")]
 pub use single_state_mod::*;
+use crate::non_evm::NonEvmState;
 

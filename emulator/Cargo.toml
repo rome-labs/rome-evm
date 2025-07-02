@@ -9,10 +9,10 @@ single-state = ["rome-evm/single-state"]
 testnet = ["rome-evm/testnet"]
 mainnet = ["rome-evm/mainnet"]
 ci = ["rome-evm/ci"]
-default = []
+default = ["ci"]
 
 [dependencies]
-rome-evm = {path = "../program", features = ["no-entrypoint"]}
+rome-evm = {path = "../program", default-features = false, features = ["no-entrypoint"]}
 solana-program = { workspace = true }
 solana-client = { workspace = true }
 bincode = { workspace = true }

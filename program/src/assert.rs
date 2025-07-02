@@ -21,4 +21,6 @@ pub fn asserts() {
     assert_eq!(align_of::<AccountType>(), 1);
     assert_eq!(size_of::<Lock>(), 41);
     assert!(RSOL_DECIMALS > 9);
+    assert_eq!(align_of::<AltId>(), 1);
+    assert_eq!(align_of::<AltSlots>(), 1);
 }

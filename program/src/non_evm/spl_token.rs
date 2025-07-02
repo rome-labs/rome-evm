@@ -3,7 +3,7 @@ use {
         instruction::Instruction,
     },
     crate::{
-        H160, pda::Seed, error::Result, origin::Origin,
+        H160, pda::Seed, error::{Result, RomeProgramError::Unimplemented}, origin::Origin,
         non_evm::{Bind, NonEvmState,},
     },
     super::{
@@ -55,14 +55,13 @@ impl<'a, T: Origin> SplToken<'a, T> {
 }
 
 impl <'a, T: Origin>Program for SplToken<'a, T> {
-    fn emulate(&self, ix: &Instruction, binds: Vec<Bind>) -> Result<()>  {
+    fn emulate(&self, ix: &Instruction, binds: &mut Vec<Bind>) -> Result<()>  {
         match TokenInstruction::unpack(&ix.data)? {
-            TransferIx { amount } => Transfer::emulate(ix, binds, amount),
-            InitializeAccount3 { owner } => InitAccount::emulate(ix, binds, &owner),
-            _ => unimplemented!(),
+            TransferIx { amount } => Transfer::emulate(&ix.accounts, binds, amount),
+            InitializeAccount3 { owner } => InitAccount::emulate(&ix.accounts, binds, &owner),
+            _ => Err(Unimplemented("instruction is not supported by SplProgram".to_string())),
         }
     }
-
     fn ix_from_abi(&self, abi: &[u8], context: &Context) ->Result<(Instruction, Seed, Vec<EvmDiff>)> {
         let (func, rest) = abi.split_at(4);
 
@@ -78,10 +77,9 @@ impl <'a, T: Origin>Program for SplToken<'a, T> {
                 let ix = InitAccount::new_from_abi(rest)?;
                 Ok((ix, Seed::default(), vec![]))
             },
-            _ => unimplemented!()
+            _ => Err(Unimplemented(format!("method is not supported by SplProgram {}", hex::encode(func))))
         }
     }
-
     fn eth_call(&self, args: &[u8], non_evm_state: &NonEvmState) -> Result<Vec<u8>> {
         let (func, rest) = args.split_at(4);
 
@@ -94,11 +92,14 @@ impl <'a, T: Origin>Program for SplToken<'a, T> {
             },
             #[cfg(feature = "single-state")]
             PROGRAM_ID_ID => Ok(spl_token::ID.to_bytes().to_vec()),
-            _ => unimplemented!()
+            _ => Err(
+                Unimplemented(
+                    format!("eth_call is not supported by SplProgram: {}", hex::encode(func))
+                )
+            )
         }
 
     }
-
     fn found_eth_call(&self, input: &[u8]) -> bool {
         let (func, _) = input.split_at(4);
 
@@ -110,5 +111,8 @@ impl <'a, T: Origin>Program for SplToken<'a, T> {
             // TODO: return revert with message
             _ => unimplemented!()
         }
+    }
+    fn transfer_allowed(&self) -> bool {
+        false
     }
 }

@@ -14,7 +14,7 @@ use {
     crate::{
         non_evm::{Program, SplToken, ASplToken, System, Withdraw,},
         origin::Origin,
-    }
+    },
 };
 
 pub fn non_evm_program<'a, T:Origin>(address: &H160, state: &'a T) -> Option<Box<dyn Program + 'a>>  {
@@ -47,7 +47,13 @@ pub fn non_evm_program<'a, T:Origin>(address: &H160, state: &'a T) -> Option<Box
 
 macro_rules! impl_contract {
     ($name:ident, $address:expr) => {
-        use crate::{non_evm::{Program, NonEvmState}, error::Result};
+        use {
+            crate::{
+                non_evm::{Program, NonEvmState, Bind, EvmDiff,}, state::pda::Seed, 
+                error::{Result, RomeProgramError::Unimplemented},
+            },
+            solana_program::instruction::Instruction,
+        };
 
         pub struct $name();
 
@@ -61,6 +67,15 @@ macro_rules! impl_contract {
             }
             fn found_eth_call(&self, _: &[u8]) -> bool {
                 true
+            }
+            fn ix_from_abi(&self, _: &[u8], _: &evm::Context) -> Result<(Instruction, Seed, Vec<EvmDiff>)> {
+                Err(Unimplemented("method is not supported by precompile contract".to_string()))
+            }
+            fn emulate(&self, _: &Instruction, _: &mut Vec<Bind>) -> Result<()> {
+                unimplemented!()
+            }
+            fn transfer_allowed(&self) -> bool {
+                false
             }
         }
     };

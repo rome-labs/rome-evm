@@ -35,11 +35,11 @@ impl<'a, T: Origin> Withdraw<'a, T> {
 }
 
 impl<'a, T: Origin> Program for Withdraw<'a, T> {
-    fn emulate(&self, ix: &Instruction, binds: Vec<Bind>) -> Result<()>  {
+    fn emulate(&self, ix: &Instruction, binds: &mut Vec<Bind>) -> Result<()>  {
 
         match limited_deserialize(&ix.data, u64::MAX).map_err(|_| InvalidNonEvmInstructionData)? {
-            Transfer {lamports} => Transfer_::emulate(ix, lamports, binds),
-            _ => unimplemented!()
+            Transfer {lamports} => Transfer_::emulate(&ix.accounts, lamports, binds),
+            _ => Err(Unimplemented("instruction is not supported by WithdrawProgram".to_string()))
         }
     }
 
@@ -69,12 +69,12 @@ impl<'a, T: Origin> Program for Withdraw<'a, T> {
                 
                 Ok((ix, seed, diff))
             },
-            _ => unimplemented!()
+            _ => Err(Unimplemented(format!("method is not supported by WithdrawProgram {}", hex::encode(func))))
         }
     }
 
     fn eth_call(&self, _: &[u8], _: &NonEvmState) -> Result<Vec<u8>> {
-        unimplemented!()
+        Err(Unimplemented("eth_call is not supported by WithdrawProgram".to_string()))
     }
 
     fn found_eth_call(&self, _: &[u8]) -> bool {

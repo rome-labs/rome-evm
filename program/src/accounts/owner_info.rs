@@ -1,7 +1,7 @@
 use {
     super::{AccountType, Data, Ver},
     crate::{
-        accounts::{cast_slice, cast_slice_mut, slise_len},
+        accounts::{cast_slice, cast_slice_mut, slice_len},
         error::{Result, RomeProgramError::UnregisteredChainId},
         H160,
     },
@@ -63,6 +63,6 @@ impl Data for OwnerInfo {
         Ver::offset(info) + Ver::size(info)
     }
     fn size(info: &AccountInfo) -> usize {
-        slise_len::<Self>(info)
+        slice_len::<Self>(info)
     }
 }
