@@ -20,21 +20,18 @@ impl AltId {
         let len = AltId::offset(info) + AltId::size(info);
         assert_eq!(len, info.data_len());
 
-        let mut alt = AltId::from_account_mut(info)?;
-        alt.session_id = 0;
+        let mut alt_id = AltId::from_account_mut(info)?;
+        alt_id.session_id = 0;
 
         Ok(())
     }
     pub fn has_session(info: &AccountInfo, id: u64) -> Result<bool> {
-        let alt = AltId::from_account(info)?;
-        
-        Ok(alt.session_id == id)
+        let alt_id = AltId::from_account(info)?;
+        Ok(alt_id.session_id == id)
     }
-    
     pub fn set_session(info: &AccountInfo, id: u64) -> Result<()> {
-        let mut alt = AltId::from_account_mut(info)?;
-        alt.session_id = id;
-        
+        let mut alt_id = AltId::from_account_mut(info)?;
+        alt_id.session_id = id;
         Ok(())
     }
 }

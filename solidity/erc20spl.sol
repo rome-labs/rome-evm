@@ -26,5 +26,10 @@ contract SPL_ERC20 is ERC20 {
     function decimals() override public pure  returns (uint8) {
         return 9;
     }
+
+    function mint_to(address target_wallet, uint256 amount) public {
+        mint(amount);
+        transfer(target_wallet, amount);
+    }
 }
 

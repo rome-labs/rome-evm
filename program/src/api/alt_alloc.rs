@@ -9,8 +9,8 @@ use {
     solana_program::{
         address_lookup_table::{
             instruction::*,
-            state::{AddressLookupTable, LookupTableMeta},
-        },
+            state::{AddressLookupTable, LookupTableMeta, LOOKUP_TABLE_MAX_ADDRESSES,},
+        }, 
         account_info::AccountInfo, msg, pubkey::{Pubkey, PUBKEY_BYTES},
     },
     std::{convert::TryFrom, mem::size_of},
@@ -23,7 +23,7 @@ pub fn alt_alloc<'a>(
 ) -> Result<()> {
     msg!("Instruction: alt_alloc");
 
-    let (holder, chain, session, recent_slot, keys) = args(data)?;
+    let (holder, chain, session, recent_slot, total, keys) = args(data)?;
     let state = State::new(program_id, accounts, chain)?;
     let info = state.info_alt_slots(holder, true)?;
 
@@ -31,7 +31,9 @@ pub fn alt_alloc<'a>(
         info,
         session,
         recent_slot,
+        total,
         keys,
+        &state,
     )?;
 
     actions
@@ -47,11 +49,12 @@ pub fn alt_alloc<'a>(
     Ok(())
 }
 
-pub fn args(data: &[u8]) -> Result<(u64, u64, u64, u64, Vec<Pubkey>)> {
+pub fn args(data: &[u8]) -> Result<(u64, u64, u64, u64, u64, Vec<Pubkey>)> {
     let (holder, data) = split_u64(data)?;
     let (chain, data) = split_u64(data)?;
     let (session, data) = split_u64(data)?;
     let (slot, data) = split_u64(data)?;
+    let (total, data) = split_u64(data)?;
 
     let keys = data
         .chunks(PUBKEY_BYTES)
@@ -62,7 +65,7 @@ pub fn args(data: &[u8]) -> Result<(u64, u64, u64, u64, Vec<Pubkey>)> {
             InvalidInstructionData
         })?;
 
-    Ok((holder, chain, session, slot, keys))
+    Ok((holder, chain, session, slot, total, keys))
 }
 
 #[derive(Clone)]
@@ -106,8 +109,10 @@ pub fn track_slots<'a, 'b>(state: &'b State<'a>,  info: &'a AccountInfo<'a>, act
             state.realloc(info, size)?;
 
             AltSlots::push(info, *slot)?;
-            AltId::set_session(info, session)?;
         },
+        Extend {slot: _, keys:_ } => {
+            AltId::set_session(info, session)?;
+        }
         Close { key: _, slot }=> {
             AltSlots::remove(info, *slot)?;
             let len = info.data_len() - size_of::<u64>();
@@ -120,11 +125,13 @@ pub fn track_slots<'a, 'b>(state: &'b State<'a>,  info: &'a AccountInfo<'a>, act
     Ok(())
 }
 
-pub fn get_alloc_actions(
+pub fn get_alloc_actions<T: Origin + Alt>(
     info: &AccountInfo,
     session: u64,
     recent_slot: u64,
+    total: u64,
     keys: Vec<Pubkey>,
+    state: &T,
 ) -> Result<Vec<Action>> {
     let mut vec = vec![];
 
@@ -137,8 +144,14 @@ pub fn get_alloc_actions(
         if AltId::has_session(info, session)? {
             vec.push(Extend{ slot: *latest, keys });
         } else {
-            vec.push(Create{ slot: recent_slot });
-            vec.push(Extend{ slot: recent_slot, keys });
+            let (key, _) = derive_lookup_table_address(&state.signer(), *latest);
+
+            if state.alt_available(key)? >= total as usize {
+                vec.push(Extend{ slot: *latest, keys });
+            } else {
+                vec.push(Create{ slot: recent_slot });
+                vec.push(Extend{ slot: recent_slot, keys });
+            }
         }
     } else {
         vec.push(Create{ slot: recent_slot });
@@ -150,6 +163,7 @@ pub fn get_alloc_actions(
 
 pub trait Alt {
     fn alt_meta(&self, key: Pubkey) -> Result<LookupTableMeta>;
+    fn alt_available(&self, key: Pubkey) -> Result<usize>;
 }
 impl<'a> Alt for State<'a> {
     fn alt_meta(&self, key: Pubkey) -> Result<LookupTableMeta> {
@@ -157,5 +171,14 @@ impl<'a> Alt for State<'a> {
         let alt =  AddressLookupTable::deserialize(&data)?;
 
         Ok(alt.meta)
+    }
+    fn alt_available(&self, key: Pubkey) -> Result<usize> {
+        let data = self.data(&key)?;
+        let alt =  AddressLookupTable::deserialize(&data)?;
+        let available = LOOKUP_TABLE_MAX_ADDRESSES
+            .checked_sub(alt.addresses.len())
+            .expect("unexpected state of address lookup table"); // unreachable
+
+        Ok(available)
     }
 }

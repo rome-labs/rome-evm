@@ -196,7 +196,7 @@ pub enum RomeProgramError {
     
     #[error("Invalid ALT instruction data, recent_slot already used: {0}")]
     AltSlotAlreadyInUse(u64),
-    
+
     #[error("Too many accounts: {0}")]
     TooManyAccounts(u64)
 }

@@ -1,3 +1,4 @@
+use solana_program::address_lookup_table::state::LOOKUP_TABLE_MAX_ADDRESSES;
 use {
     super::Emulation,
     crate::state::State,
@@ -21,7 +22,7 @@ pub fn alt_alloc<'a>(
 ) -> Result<Emulation> {
     msg!("Instruction: alt_alloc");
 
-    let (holder, chain, session, recent_slot, keys) = args(data)?;
+    let (holder, chain, session, recent_slot, total, keys) = args(data)?;
     let state = State::new(program_id, Some(*signer), client, chain)?;
 
     let mut bind = state.info_alt_slots(holder, true)?;
@@ -31,7 +32,9 @@ pub fn alt_alloc<'a>(
             &info,
             session,
             recent_slot,
+            total,
             keys,
+            &state
         )?;
 
     actions
@@ -57,9 +60,14 @@ pub fn track_slots(state: &State, key: &Pubkey, action: &Action, session: u64) -
             let info = bind.into_account_info();
 
             AltSlots::push(&info, *slot)?;
-            AltId::set_session(&info, session)?;
             state.update(bind);
         },
+        Extend {slot: _, keys:_ } => {
+            let mut bind = state.info_sys(key)?;
+            let info = bind.into_account_info();
+            AltId::set_session(&info, session)?;
+            state.update(bind);
+        }
         Close { key: _, slot }=> {
             let mut bind = state.info_sys(key)?;
             let info = bind.into_account_info();
@@ -85,6 +93,16 @@ impl<'a> Alt for State<'a> {
         let bind = self.info_sys(&key)?;
         let alt =  AddressLookupTable::deserialize(&bind.1.data)?;
         Ok(alt.meta)
+    }
+    fn alt_available(&self, key: Pubkey) -> Result<usize> {
+        let bind = self.info_sys(&key)?;
+        let alt =  AddressLookupTable::deserialize(&bind.1.data)?;
+
+        let available = LOOKUP_TABLE_MAX_ADDRESSES
+            .checked_sub(alt.addresses.len())
+            .expect("unexpected state of address lookup table"); // unreachable
+
+        Ok(available)
     }
 }
 

@@ -8,7 +8,10 @@ use {
     evm::{H160, U256},
     solana_program::{
         account_info::AccountInfo, pubkey::Pubkey, rent::Rent,
-        system_instruction, system_program, sysvar::recent_blockhashes, sysvar::Sysvar,
+        system_program, sysvar::recent_blockhashes, sysvar::Sysvar,
+    },
+    solana_system_interface::instruction::{
+        create_account, transfer
     },
     std::{cmp::Ordering::*, collections::HashMap, iter::FromIterator, ops::Deref, cell::Ref},
 };
@@ -128,7 +131,7 @@ impl<'a> State<'a> {
             assert_eq!(*info.owner, system_program::ID);
 
             let rent = Rent::get()?.minimum_balance(0);
-            let ix = &system_instruction::create_account(
+            let ix = &create_account(
                 self.signer.key,
                 info.key,
                 rent,
@@ -182,7 +185,7 @@ impl<'a> State<'a> {
 
         match rent.cmp(&info.lamports()) {
             Greater => {
-                let ix = system_instruction::transfer(self.signer.key, info.key, rent - info.lamports());
+                let ix = transfer(self.signer.key, info.key, rent - info.lamports());
                 self.invoke_signed(&ix, &Seed::default(), is_paid)?;
             }
             Less => {
@@ -213,7 +216,7 @@ impl<'a> State<'a> {
         let len = Pda::empty_size(pda, typ);
         let rent = Rent::get()?.minimum_balance(len);
 
-        let ix = system_instruction::create_account(
+    let ix = create_account(
             self.signer.key,
             pda.key,
             rent,

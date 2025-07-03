@@ -13,7 +13,8 @@ thiserror = "1.0.58"
 # solana
 solana-client = "2.1.7"
 solana-program = { version = "2.1.7", features = ["borsh"] }
-solana-bn254 = { version = "2.1.7" }
+solana-system-interface = { version = "1.0.0", features = ["bincode"] }
+solana-bn254 = { version = "=2.1.7" }
 spl-token = { version = "7.0.0", features = ["no-entrypoint"] }
 spl-associated-token-account = { version = "6.0.0", features = ["no-entrypoint"] }
 

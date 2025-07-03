@@ -16,6 +16,7 @@ ci = []
 [dependencies]
 evm = { workspace = true }
 solana-program = { workspace = true }
+solana-system-interface = { workspace = true }
 solana-bn254 = { workspace = true }
 rlp = { workspace = true }
 thiserror = { workspace = true }

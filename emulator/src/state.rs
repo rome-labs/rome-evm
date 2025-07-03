@@ -11,8 +11,9 @@ use {
     solana_client::rpc_client::RpcClient,
     solana_program::{
         account_info::IntoAccountInfo, msg, pubkey::Pubkey, rent::Rent, system_program,
-        sysvar::Sysvar, program_stubs::set_syscall_stubs, system_instruction,
+        sysvar::Sysvar, program_stubs::set_syscall_stubs,
     },
+    solana_system_interface::instruction::{create_account, transfer},
     std::{
         cell::RefCell, collections::BTreeMap, ops::Deref, sync::Arc, cmp::Ordering::{Greater, Less}},
 };
@@ -208,7 +209,7 @@ impl<'a> State<'a> {
             assert_eq!(bind.1.owner, system_program::ID);
 
             let rent = Rent::get()?.minimum_balance(0);
-            let ix = &system_instruction::create_account(
+            let ix = &create_account(
                 &self.signer(),
                 &key,
                 rent,
@@ -364,7 +365,7 @@ impl<'a> State<'a> {
         match rent.cmp(&lamports) {
             Greater => {
                 self.update(bind);
-                let ix = system_instruction::transfer(&self.signer(), key, rent - lamports);
+                let ix = transfer(&self.signer(), key, rent - lamports);
                 self.invoke_signed(&ix, &Seed::default(), refund_to_signer)?;
             }
             Less => {
@@ -396,7 +397,7 @@ impl<'a> State<'a> {
         let len = State::pda_size(typ);
         let rent = Rent::get()?.minimum_balance(len);
 
-        let ix = system_instruction::create_account(
+        let ix = create_account(
             &self.signer(),
             &key,
             rent,
