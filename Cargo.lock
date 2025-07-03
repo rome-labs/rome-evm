@@ -1228,7 +1228,7 @@ dependencies = [
 [[package]]
 name = "evm"
 version = "0.18.0"
-source = "git+https://github.com/rome-labs/evm.git?branch=master#3edd8cdc60298e5848a699cdd217761673343ed6"
+source = "git+https://github.com/rome-labs/evm.git?branch=master#95a8c772b26a8895a0757a49ad1d9e6152595b51"
 dependencies = [
  "evm-core",
  "evm-runtime",
@@ -1242,7 +1242,7 @@ dependencies = [
 [[package]]
 name = "evm-core"
 version = "0.18.2"
-source = "git+https://github.com/rome-labs/evm.git?branch=master#3edd8cdc60298e5848a699cdd217761673343ed6"
+source = "git+https://github.com/rome-labs/evm.git?branch=master#95a8c772b26a8895a0757a49ad1d9e6152595b51"
 dependencies = [
  "borsh 1.5.7",
  "fixed-hash",
@@ -1259,7 +1259,7 @@ dependencies = [
 [[package]]
 name = "evm-runtime"
 version = "0.18.0"
-source = "git+https://github.com/rome-labs/evm.git?branch=master#3edd8cdc60298e5848a699cdd217761673343ed6"
+source = "git+https://github.com/rome-labs/evm.git?branch=master#95a8c772b26a8895a0757a49ad1d9e6152595b51"
 dependencies = [
  "borsh 1.5.7",
  "evm-core",
